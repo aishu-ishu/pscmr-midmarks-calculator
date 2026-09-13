@@ -1,10 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-torchvision
-easyocr
-opencv-python-headless
-Flask
-flask-cors
-gunicorn
-numpy
+pytesseract
 Pillow
+Flask
+gunicorn
+opencv-python-headless
