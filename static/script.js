@@ -138,19 +138,27 @@ function startTimer() {
     startTime = Date.now();
     const loading = document.getElementById('loading');
     loading.style.display = 'inline-block';
+    loading.style.color = 'var(--primary)';
     
     timerInterval = setInterval(() => {
         const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
         const mins = Math.floor(elapsedSeconds / 60);
         const secs = elapsedSeconds % 60;
-        const formattedTime = `${mins}m ${secs}s`;
         
-        loading.innerText = `Processing... (${formattedTime})`;
+        loading.innerText = `Processing... (${mins}m ${secs}s)`;
     }, 1000);
 }
 
 function stopTimer() {
     clearInterval(timerInterval);
+    const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsedSeconds / 60);
+    const secs = elapsedSeconds % 60;
+    
+    const loading = document.getElementById('loading');
+    loading.style.display = 'inline-block';
+    loading.style.color = '#16a34a'; // Success green
+    loading.innerText = `Completed in ${mins}m ${secs}s`;
 }
 
 function previewImage(event) {
@@ -190,8 +198,7 @@ async function uploadImage() {
 
         const data = await response.json();
         
-        stopTimer();
-        loading.style.display = 'none';
+        stopTimer(); // This now stops the interval and leaves the final duration visible
 
         if (!response.ok || data.error) {
             container.innerHTML = `<div style="color:red; text-align:center;">${data.error || 'Failed to process image'}</div>`;
@@ -203,7 +210,7 @@ async function uploadImage() {
             const cardHTML = `
                 <div class="subject-card">
                     <div class="card-header">
-                        Subject: ${subject.Subject}
+                        🏆 Subject: ${subject.Subject}
                     </div>
                     <div class="card-body">
                         <!-- Mid 1 & Mid 2 Top Grid -->
@@ -261,7 +268,8 @@ async function uploadImage() {
 
     } catch (error) {
         stopTimer();
-        loading.style.display = 'none';
+        loading.style.color = '#dc2626'; // Error red
+        loading.innerText = 'Failed to connect';
         container.innerHTML = `<div style="color:red; text-align:center;">Error connecting to server.</div>`;
     }
 }
