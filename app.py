@@ -1,7 +1,15 @@
+import os
+
+# Limit PyTorch / OpenMP CPU threads at startup to prevent RAM spikes on 512 MB containers
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import gc
 import io
 import math
-import os
 import cv2
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
