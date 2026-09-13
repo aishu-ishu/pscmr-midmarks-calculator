@@ -22,17 +22,19 @@
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1200px; /* Increased from 900px to give more overall workspace */
             margin: 0 auto;
         }
 
         .upload-card {
             background: var(--card-bg);
-            padding: 25px;
+            padding: 30px;
             border-radius: 12px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.05);
             margin-bottom: 30px;
             text-align: center;
+            width: 100%;       /* Ensures it spans the container fully */
+            box-sizing: border-box; /* Includes padding in width calculations */
         }
 
         .upload-card input[type="file"] {
