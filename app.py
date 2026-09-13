@@ -77,6 +77,14 @@ def process_image():
     try:
         image_bytes = file.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        
+        # Downscale large phone images to max width 1200px for massive speed gains
+        max_width = 1200
+        if pil_img.width > max_width:
+            ratio = max_width / float(pil_img.width)
+            new_height = int(float(pil_img.height) * ratio)
+            pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
         img = np.array(pil_img)
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
@@ -132,7 +140,11 @@ def process_image():
                     row_texts.append("")
                     continue
                 cell_pil = Image.fromarray(cell_crop)
-                cell_text = pytesseract.image_to_string(cell_pil, config="--psm 7").strip()
+                
+                # Use fast LSTM engine (--oem 1) and single-line mode (--psm 7)
+                cell_text = pytesseract.image_to_string(
+                    cell_pil, config="--oem 1 --psm 7"
+                ).strip()
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
