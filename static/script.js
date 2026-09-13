@@ -75,7 +75,7 @@ async function uploadImage() {
             const cardHTML = `
                 <div class="subject-card">
                     <div class="card-header">
-                        🏆 Subject: ${subject.Subject}
+                         Subject: ${subject.Subject}
                     </div>
                     <div class="card-body">
                         <!-- Mid 1 & Mid 2 Top Grid -->
