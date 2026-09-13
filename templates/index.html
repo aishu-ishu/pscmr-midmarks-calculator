@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Academic Marks Dashboard</title>
+    <style>
+        :root {
+            --primary: #5c5be5;
+            --bg: #f4f6fa;
+            --card-bg: #ffffff;
+            --text-dark: #2c3e50;
+            --text-muted: #6c757d;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            margin: 0;
+            padding: 30px 20px;
+            color: var(--text-dark);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .upload-card {
+            background: var(--card-bg);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .upload-card input[type="file"] {
+            margin: 15px 0;
+        }
+
+        #preview {
+            max-height: 250px;
+            border-radius: 8px;
+            margin: 15px auto;
+            display: none;
+        }
+
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #4a49cc;
+        }
+
+        /* Subject Card Component */
+        .subject-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+            margin-bottom: 35px;
+            overflow: hidden;
+        }
+
+        .card-header {
+            background: linear-gradient(135deg, #6366f1, #4f46e5);
+            color: white;
+            padding: 16px 24px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-body {
+            padding: 24px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        /* Top Metric Boxes */
+        .metric-box {
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid #e5e7eb;
+            position: relative;
+        }
+
+        .metric-box.best {
+            background-color: #f0fdf4;
+            border-color: #bbf7d0;
+        }
+
+        .box-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .box-value {
+            font-size: 2rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .box-sub {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .badge-best {
+            display: inline-block;
+            background: #22c55e;
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-top: 8px;
+        }
+
+        /* Weightage Split Box */
+        .weightage-banner {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 12px;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .w-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .w-label {
+            font-size: 0.85rem;
+            color: #2563eb;
+            font-weight: 600;
+        }
+
+        .w-val {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: #1e3a8a;
+        }
+
+        /* Highlight Boxes Bottom */
+        .banner-blue {
+            background: #3b82f6;
+            color: white;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .banner-orange {
+            background: #ff6b35;
+            color: white;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .banner-title {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: 6px;
+        }
+
+        .banner-val {
+            font-size: 2.2rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .banner-sub {
+            font-size: 0.8rem;
+            opacity: 0.85;
+            margin-top: 4px;
+        }
+
+        /* Bottom Alert Pill */
+        .status-pill {
+            margin-top: 20px;
+            background: #faf5ff;
+            border: 1px solid #e9d5ff;
+            color: #7e22ce;
+            text-align: center;
+            padding: 12px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        #loading {
+            text-align: center;
+            display: none;
+            font-weight: bold;
+            color: var(--primary);
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="upload-card">
+        <h2>Local Image to Marks Analytics</h2>
+        <input type="file" id="imageInput" accept="image/*" onchange="previewImage(event)">
+        <br>
+        <img id="preview" alt="Selected Image Preview">
+        <br>
+        <button onclick="uploadImage()">Extract & Calculate Analytics</button>
+    </div>
+
+    <div id="loading">Processing image & calculating score analytics...</div>
+
+    <div id="resultsContainer"></div>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
