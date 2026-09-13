@@ -7,7 +7,10 @@ function startTimer() {
     loading.style.display = 'block';
     
     timerInterval = setInterval(() => {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+        const mins = Math.floor(elapsedSeconds / 60);
+        const secs = elapsedSeconds % 60;
+        const formattedTime = `${mins}m ${secs}s`;
         loading.innerText = `Processing image & calculating score analytics... (${elapsed}s)`;
     }, 100);
 }
