@@ -1,12 +1,4 @@
 import os
-
-# Limit PyTorch / OpenMP CPU threads at startup to prevent RAM spikes on 512 MB containers
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-
 import gc
 import io
 import math
@@ -15,28 +7,12 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 import numpy as np
 from PIL import Image
+import pytesseract
 
 app = Flask(__name__)
-# Enable CORS in case you host frontend (e.g., Vercel) and backend separately
 CORS(app)
 
-# Limit maximum upload file size to 16 MB to prevent memory exhaustion
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
-
-# Global variable for OCR reader; initialized lazily to save RAM on startup
-reader = None
-
-
-def get_ocr_reader():
-    """Lazily loads EasyOCR model into RAM only when needed."""
-    global reader
-    if reader is None:
-        import easyocr
-
-        # gpu=False keeps it lightweight for CPU environments
-        reader = easyocr.Reader(["en"], gpu=False)
-    return reader
-
 
 def parse_score(val):
     if not val or val in ["-", "--", "null", "None", ""]:
@@ -51,27 +27,22 @@ def parse_score(val):
     except ValueError:
         return 0.0
 
-
 def round_half_up(n):
     return math.floor(n + 0.5)
-
 
 def calculate_analytics(
     u1, u2, u3, obj, assign, mid2_u1=0, mid2_u2=0, mid2_u3=0, mid2_obj=0, mid2_assign=0
 ):
-    # Mid 1
     m1_units = round_half_up(
         (parse_score(u1) + parse_score(u2) + parse_score(u3)) / 2.0
     )
     mid1_total = int(m1_units + parse_score(obj) + parse_score(assign))
 
-    # Mid 2 (Placeholder 0 until Mid 2 arrives)
     m2_units = round_half_up(
         (parse_score(mid2_u1) + parse_score(mid2_u2) + parse_score(mid2_u3)) / 2.0
     )
     mid2_total = int(m2_units + parse_score(mid2_obj) + parse_score(mid2_assign))
 
-    # Best / Other selection
     best_mid = max(mid1_total, mid2_total)
     other_mid = min(mid1_total, mid2_total)
 
@@ -79,8 +50,6 @@ def calculate_analytics(
     other_20 = int(round_half_up(other_mid * 0.2)) if mid2_total > 0 else 0
 
     final_mid_avg = best_80 + other_20
-
-    # Semester Exam Target
     req_sem = max(24, 40 - final_mid_avg)
 
     return {
@@ -92,11 +61,9 @@ def calculate_analytics(
         "Required_Sem_Marks": req_sem,
     }
 
-
 @app.route("/")
 def home():
     return render_template("index.html")
-
 
 @app.route("/process-image", methods=["POST"])
 def process_image():
@@ -108,9 +75,6 @@ def process_image():
         return jsonify({"error": "No selected file"}), 400
 
     try:
-        # Obtain EasyOCR reader instance
-        ocr_reader = get_ocr_reader()
-
         image_bytes = file.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         img = np.array(pil_img)
@@ -167,8 +131,8 @@ def process_image():
                 if cell_crop.size == 0:
                     row_texts.append("")
                     continue
-                res = ocr_reader.readtext(cell_crop, detail=0)
-                cell_text = " ".join(res).strip() if res else ""
+                cell_pil = Image.fromarray(cell_crop)
+                cell_text = pytesseract.image_to_string(cell_pil, config="--psm 7").strip()
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
@@ -237,17 +201,13 @@ def process_image():
             s_dict.update(analytics)
             final_rows.append(s_dict)
 
-        # Trigger garbage collection to free memory on small server tiers
         gc.collect()
-
         return jsonify({"rows": final_rows})
 
     except Exception as e:
         gc.collect()
         return jsonify({"error": str(e)}), 500
 
-
 if __name__ == "__main__":
-    # Dynamically bind to host port (defaults to 5000 locally, uses $PORT on Render/Koyeb)
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
