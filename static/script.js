@@ -1,3 +1,21 @@
+let startTime;
+let timerInterval;
+
+function startTimer() {
+    startTime = Date.now();
+    const loading = document.getElementById('loading');
+    loading.style.display = 'block';
+    
+    timerInterval = setInterval(() => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        loading.innerText = `Processing image & calculating score analytics... (${elapsed}s)`;
+    }, 100);
+}
+
+function stopTimer() {
+    clearInterval(timerInterval);
+}
+
 function previewImage(event) {
     const reader = new FileReader();
     reader.onload = function() {
@@ -24,7 +42,8 @@ async function uploadImage() {
     formData.append('file', fileInput.files[0]);
 
     container.innerHTML = '';
-    loading.style.display = 'block';
+    
+    startTimer();
 
     try {
         const response = await fetch('/process-image', {
@@ -33,6 +52,8 @@ async function uploadImage() {
         });
 
         const data = await response.json();
+        
+        stopTimer();
         loading.style.display = 'none';
 
         if (!response.ok || data.error) {
@@ -45,7 +66,7 @@ async function uploadImage() {
             const cardHTML = `
                 <div class="subject-card">
                     <div class="card-header">
-                        🏆 Subject: ${subject.Subject}
+                         Subject: ${subject.Subject}
                     </div>
                     <div class="card-body">
                         <!-- Mid 1 & Mid 2 Top Grid -->
@@ -102,6 +123,7 @@ async function uploadImage() {
         });
 
     } catch (error) {
+        stopTimer();
         loading.style.display = 'none';
         container.innerHTML = `<div style="color:red; text-align:center;">Error connecting to server.</div>`;
     }
