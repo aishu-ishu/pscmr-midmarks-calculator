@@ -219,10 +219,61 @@
             color: var(--primary);
             margin: 20px 0;
         }
+        /* Modal Overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-card {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 16px;
+            max-width: 450px;
+            width: 90%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            text-align: left;
+        }
+
+        .modal-card h3 {
+            margin-top: 0;
+            color: var(--text-dark);
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+        }
+
+        .modal-card p {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .modal-card button {
+            width: 100%;
+            margin-top: 15px;
+            padding: 12px;
+        }
     </style>
 </head>
 <body>
-
+<!-- Welcome Warning Modal -->
+<div id="warningModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3>⚠️ Performance & Accuracy Notice</h3>
+        <p>• Image extraction and calculation typically take around <strong>1 to 2 minutes</strong> to complete.</p>
+        <p>• For more precise analytics and better predictions, providing marks for <strong>both mid-term exams</strong> is recommended.</p>
+        <button onclick="closeModal()">Got it, let's begin</button>
+    </div>
+</div>
 <div class="container">
     <div class="upload-card">
         <h2>Local Image to Marks Analytics</h2>
