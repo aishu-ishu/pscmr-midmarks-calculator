@@ -15,7 +15,7 @@ CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 def parse_score(val):
-    if not val or val in ["-", "--", "null", "None", ""]:
+    if not val or val in ["-", "--", "null", "None", "", "."]:
         return 0.0
     if isinstance(val, str) and "/" in val:
         try:
@@ -45,7 +45,8 @@ def calculate_analytics(
     other_mid = min(mid1_total, mid2_total)
 
     best_80 = int(round_half_up(best_mid * 0.8))
-    other_20 = int(round_half_up(other_mid * 0.2)) if mid2_total > 0 else 0
+    # If both mids are 0 (e.g. NPTEL), other_20 is 0
+    other_20 = int(round_half_up(other_mid * 0.2)) if (mid1_total > 0 or mid2_total > 0) else 0
 
     final_mid_avg = best_80 + other_20
     req_sem = max(24, 40 - final_mid_avg)
@@ -144,10 +145,29 @@ def process_image():
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
+        # Transpose or pivot approach: 
+        # In your table layout, rows represent the metric labels (Unit-1, Unit-2, etc.) 
+        # and columns represent the subjects. 
+        # Let's dynamically map header columns (which contain subject names) and row metrics.
+        
         header_row = extracted_grid[0]
-        subjects = [
-            s for s in header_row if s.lower() not in ["subject", "total", ""]
-        ]
+        
+        # Identify subject columns by looking at columns past index 0
+        subjects = []
+        subject_col_indices = []
+        for idx, text in enumerate(header_row):
+            cleaned = text.strip()
+            if idx > 0 and cleaned.lower() not in ["subject", "total", ""] and len(cleaned) > 0:
+                subjects.append(cleaned)
+                subject_col_indices.append(idx)
+
+        # Fallback if header detection fails to map columns correctly
+        if not subjects and len(extracted_grid) > 0:
+            # Assume columns 1 onwards are subjects based on known count (6 subjects)
+            num_cols = len(header_row)
+            for idx in range(1, num_cols):
+                subjects.append(header_row[idx] if header_row[idx] else f"Subject_{idx}")
+                subject_col_indices.append(idx)
 
         target_columns = [
             "Unit-1", "Unit-2", "Unit-3(1)", "Obj-1(A)", "Assignment-1(A)", "Internal-I total",
@@ -189,7 +209,7 @@ def process_image():
                 continue
 
             for s_idx, subject in enumerate(subjects):
-                col_idx = s_idx + 1
+                col_idx = subject_col_indices[s_idx] if s_idx < len(subject_col_indices) else (s_idx + 1)
                 if col_idx < len(row):
                     cell_val = row[col_idx].replace(" ", "")
                     if cell_val and cell_val not in ["-", "--", "None", "null"]:
@@ -215,7 +235,7 @@ def process_image():
 
             s_dict.update(analytics)
             final_rows.append(s_dict)
-# Add debug print here to see the raw extracted data in your terminal/logs
+
         print("DEBUG FINAL ROWS:", final_rows)
         gc.collect()
         return jsonify({"rows": final_rows})
