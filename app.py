@@ -215,7 +215,8 @@ def process_image():
 
             s_dict.update(analytics)
             final_rows.append(s_dict)
-
+# Add debug print here to see the raw extracted data in your terminal/logs
+        print("DEBUG FINAL ROWS:", final_rows)
         gc.collect()
         return jsonify({"rows": final_rows})
 
