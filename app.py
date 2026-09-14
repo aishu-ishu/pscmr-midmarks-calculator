@@ -45,7 +45,6 @@ def calculate_analytics(
     other_mid = min(mid1_total, mid2_total)
 
     best_80 = int(round_half_up(best_mid * 0.8))
-    # If both mids are 0 (e.g. NPTEL), other_20 is 0
     other_20 = int(round_half_up(other_mid * 0.2)) if (mid1_total > 0 or mid2_total > 0) else 0
 
     final_mid_avg = best_80 + other_20
@@ -145,14 +144,8 @@ def process_image():
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
-        # Transpose or pivot approach: 
-        # In your table layout, rows represent the metric labels (Unit-1, Unit-2, etc.) 
-        # and columns represent the subjects. 
-        # Let's dynamically map header columns (which contain subject names) and row metrics.
-        
         header_row = extracted_grid[0]
         
-        # Identify subject columns by looking at columns past index 0
         subjects = []
         subject_col_indices = []
         for idx, text in enumerate(header_row):
@@ -161,9 +154,7 @@ def process_image():
                 subjects.append(cleaned)
                 subject_col_indices.append(idx)
 
-        # Fallback if header detection fails to map columns correctly
         if not subjects and len(extracted_grid) > 0:
-            # Assume columns 1 onwards are subjects based on known count (6 subjects)
             num_cols = len(header_row)
             for idx in range(1, num_cols):
                 subjects.append(header_row[idx] if header_row[idx] else f"Subject_{idx}")
@@ -174,17 +165,21 @@ def process_image():
             "Unit-3(2)", "Unit-4", "Unit-5", "Obj-2(A)", "Assignment-2(A)", "Internal-II total"
         ]
 
+        # Prioritize specific sub-keys (like unit-3(2)) before generic substrings (like unit-3)
         metric_map = {
+            "unit-3(2)": "Unit-3(2)",
+            "unit-3.2": "Unit-3(2)",
+            "unit-3 (2)": "Unit-3(2)",
+            "unit-3(1)": "Unit-3(1)",
+            "unit-3.1": "Unit-3(1)",
+            "unit-3": "Unit-3(1)",
             "unit-1": "Unit-1",
             "unit-2": "Unit-2",
-            "unit-3(1)": "Unit-3(1)",
-            "unit-3": "Unit-3(1)",
             "obj-1(a)": "Obj-1(A)",
             "obj-i(a)": "Obj-1(A)",
             "assignment-1(a)": "Assignment-1(A)",
             "assignment-i(a)": "Assignment-1(A)",
             "internal-i total": "Internal-I total",
-            "unit-3(2)": "Unit-3(2)",
             "unit-4": "Unit-4",
             "unit-5": "Unit-5",
             "obj-2(a)": "Obj-2(A)",
@@ -201,10 +196,16 @@ def process_image():
 
             raw_label = row[0].lower().strip()
             matched_key = None
+            
             for k, v in metric_map.items():
                 if k in raw_label:
                     matched_key = v
                     break
+            
+            # Fallback based on structural row position if OCR label is unreadable
+            if not matched_key and 0 < r_idx <= len(target_columns):
+                matched_key = target_columns[r_idx - 1]
+
             if not matched_key:
                 continue
 
@@ -212,7 +213,7 @@ def process_image():
                 col_idx = subject_col_indices[s_idx] if s_idx < len(subject_col_indices) else (s_idx + 1)
                 if col_idx < len(row):
                     cell_val = row[col_idx].replace(" ", "")
-                    if cell_val and cell_val not in ["-", "--", "None", "null"]:
+                    if cell_val and cell_val not in ["-", "--", "None", "null", "."]:
                         subject_data[subject][matched_key] = cell_val
 
         final_rows = []
@@ -236,7 +237,6 @@ def process_image():
             s_dict.update(analytics)
             final_rows.append(s_dict)
 
-        print("DEBUG FINAL ROWS:", final_rows)
         gc.collect()
         return jsonify({"rows": final_rows})
 
