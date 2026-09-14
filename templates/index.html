@@ -253,6 +253,8 @@
 </script>
 </body>
 </html> -->
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -448,6 +450,8 @@
             width: 90%;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             text-align: left;
+            max-height: 90vh;
+            overflow-y: auto;
         }
         .modal-card h3 {
             margin-top: 0;
@@ -459,6 +463,14 @@
             font-size: 0.95rem;
             color: var(--text-muted);
             line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        .modal-card img {
+            width: 100%;
+            max-height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-top: 8px;
             margin-bottom: 12px;
         }
         .modal-card button {
@@ -474,12 +486,12 @@
         <h3>⚠️ Performance & Accuracy Notice</h3>
         <p style="color:red;">• Image extraction and calculation typically take around <strong>1 to 3 minutes</strong> to complete.</p>
         <p style="color:red;">• For more precise analytics and better predictions, providing marks for <strong>both mid-term exams</strong> is recommended.</p>
-         <p style="color:red;">• <strong>Maximum users are "2" and if more than 2 users uses your website stucks on loading</strong></p>
-        <p style="color:red;">• Upload image should be like</p>
-        <img src="templates/demo.png" alt="sample image">
-        <img src="templates/y.jpg" alt="demo image">
-
-
+        <p style="color:red;">• <strong>Maximum users are "2" and if more than 2 users uses your website stucks on loading</strong></p>
+        <p style="color:red;">• Upload image should look like:</p>
+        <div style="display: flex; gap: 8px;">
+            <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image">
+            <img src="{{ url_for('static', filename='y.jpg') }}" alt="demo image">
+        </div>
         <button onclick="closeModal()">Got it, let's begin</button>
     </div>
 </div>
