@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Academic Marks Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         :root {
             --primary: #5c5be5;
@@ -13,7 +12,6 @@
             --text-dark: #2c3e50;
             --text-muted: #6c757d;
         }
-
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: var(--bg);
@@ -21,12 +19,10 @@
             padding: 30px 20px;
             color: var(--text-dark);
         }
-
         .container {
             max-width: 1200px;
             margin: 0 auto;
         }
-
         .upload-card {
             background: var(--card-bg);
             padding: 30px;
@@ -37,18 +33,15 @@
             width: 100%;
             box-sizing: border-box;
         }
-
         .upload-card input[type="file"] {
             margin: 15px 0;
         }
-
         #preview {
             max-height: 250px;
             border-radius: 8px;
             margin: 15px auto;
             display: none;
         }
-
         button {
             background: var(--primary);
             color: white;
@@ -59,11 +52,9 @@
             cursor: pointer;
             transition: background 0.2s;
         }
-
         button:hover {
             background: #4a49cc;
         }
-
         /* Subject Card Component */
         .subject-card {
             background: var(--card-bg);
@@ -72,7 +63,6 @@
             margin-bottom: 35px;
             overflow: hidden;
         }
-
         .card-header {
             background: linear-gradient(135deg, #6366f1, #4f46e5);
             color: white;
@@ -83,49 +73,41 @@
             align-items: center;
             gap: 10px;
         }
-
         .card-body {
             padding: 24px;
         }
-
         .grid-2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 16px;
             margin-bottom: 16px;
         }
-
         .metric-box {
             border-radius: 12px;
             padding: 16px;
             border: 1px solid #e5e7eb;
             position: relative;
         }
-
         .metric-box.best {
             background-color: #f0fdf4;
             border-color: #bbf7d0;
         }
-
         .box-title {
             font-size: 0.85rem;
             color: var(--text-muted);
             margin-bottom: 8px;
             font-weight: 500;
         }
-
         .box-value {
             font-size: 2rem;
             font-weight: 800;
             line-height: 1;
         }
-
         .box-sub {
             font-size: 0.8rem;
             color: var(--text-muted);
             margin-top: 4px;
         }
-
         .badge-best {
             display: inline-block;
             background: #22c55e;
@@ -136,7 +118,6 @@
             border-radius: 12px;
             margin-top: 8px;
         }
-
         .weightage-banner {
             background: #eff6ff;
             border: 1px solid #bfdbfe;
@@ -147,56 +128,47 @@
             align-items: center;
             margin-bottom: 16px;
         }
-
         .w-item {
             display: flex;
             flex-direction: column;
         }
-
         .w-label {
             font-size: 0.85rem;
             color: #2563eb;
             font-weight: 600;
         }
-
         .w-val {
             font-size: 1.5rem;
             font-weight: 800;
             color: #1e3a8a;
         }
-
         .banner-blue {
             background: #3b82f6;
             color: white;
             border-radius: 12px;
             padding: 20px;
         }
-
         .banner-orange {
             background: #ff6b35;
             color: white;
             border-radius: 12px;
             padding: 20px;
         }
-
         .banner-title {
             font-size: 0.9rem;
             opacity: 0.9;
             margin-bottom: 6px;
         }
-
         .banner-val {
             font-size: 2.2rem;
             font-weight: 800;
             line-height: 1;
         }
-
         .banner-sub {
             font-size: 0.8rem;
             opacity: 0.85;
             margin-top: 4px;
         }
-
         .status-pill {
             margin-top: 20px;
             background: #faf5ff;
@@ -208,7 +180,6 @@
             font-weight: 600;
             font-size: 0.95rem;
         }
-
         /* Modal Overlay */
         .modal-overlay {
             position: fixed;
@@ -222,7 +193,6 @@
             align-items: center;
             z-index: 1000;
         }
-
         .modal-card {
             background: var(--card-bg);
             padding: 30px;
@@ -232,21 +202,18 @@
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             text-align: left;
         }
-
         .modal-card h3 {
             margin-top: 0;
             color: var(--text-dark);
             font-size: 1.3rem;
             margin-bottom: 15px;
         }
-
         .modal-card p {
             font-size: 0.95rem;
             color: var(--text-muted);
             line-height: 1.5;
             margin-bottom: 12px;
         }
-
         .modal-card button {
             width: 100%;
             margin-top: 15px;
@@ -255,7 +222,6 @@
     </style>
 </head>
 <body>
-
 <!-- Welcome Warning Modal -->
 <div id="warningModal" class="modal-overlay">
     <div class="modal-card">
@@ -265,7 +231,6 @@
         <button onclick="closeModal()">Got it, let's begin</button>
     </div>
 </div>
-
 <div class="container">
     <div class="upload-card">
         <h2>Upload Image and get your mid average</h2>
@@ -273,23 +238,19 @@
         <br>
         <img id="preview" alt="Selected Image Preview">
         <br>
-        
         <!-- Action Row: Button and Timer side-by-side -->
         <div style="display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
             <button onclick="uploadImage()">Extract & Calculate Analytics</button>
             <span id="loading" style="display: none; font-weight: 600; color: var(--primary); font-size: 0.95rem;"></span>
         </div>
     </div>
-
     <div id="resultsContainer"></div>
 </div>
-
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 <script>
     function closeModal() {
         document.getElementById('warningModal').style.display = 'none';
     }
 </script>
-
 </body>
 </html>
