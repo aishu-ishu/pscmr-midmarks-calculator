@@ -184,9 +184,8 @@ async function uploadImage() {
         data.rows.forEach(subject => {
             const mid1IsBest = subject.Mid1_Score >= subject.Mid2_Score;
             
-            // Dynamic styling configuration for Required Semester Marks
+            // Dynamic styling: 24 is green, >24 is bold red
             const isGreen = subject.Required_Sem_Marks === 24;
-            const bannerClass = isGreen ? 'banner-green' : 'banner-red';
             const boxStyle = isGreen 
                 ? 'background-color: #dcfce7; border: 2px solid #16a34a; color: #15803d;' 
                 : 'background-color: #fee2e2; border: 2px solid #dc2626; color: #b91c1c;';
@@ -228,7 +227,7 @@ async function uploadImage() {
                                 <div class="banner-val">${subject.Final_Mid_Average}</div>
                                 <div class="banner-sub">out of 30</div>
                             </div>
-                            <div class="${bannerClass}" style="${boxStyle}">
+                            <div style="${boxStyle}; border-radius: 12px; padding: 20px;">
                                 <div class="banner-title" style="${textStyle}">Required Semester Marks</div>
                                 <div class="banner-val" style="${textStyle}">${subject.Required_Sem_Marks}</div>
                                 <div class="banner-sub" style="${textStyle}">out of 70</div>
