@@ -351,17 +351,44 @@ def process_image():
 
         extracted_text = parsed_results[0].get("ParsedText", "")
 
-        # Fallback / Placeholder parser for raw text output line-by-line
-        # (Customize this block if your table rows follow a predictable plain text pattern)
+        # Smart Text Parser for OCR.space lines
         lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
         
         final_rows = []
-        # If your text layout returns standard rows, map them accordingly here.
-        # Returning structural text confirmation or sample fallback rows:
-        if not final_rows:
-            # Example baseline layout conversion if api text is parsed
+        current_subject = "Subject 1"
+        extracted_numbers = []
+
+        for line in lines:
+            words = line.split()
+            numbers = [w for w in words if w.replace('.', '', 1).isdigit()]
+            
+            if len(numbers) >= 3:
+                extracted_numbers.extend(numbers)
+            elif len(words) > 0 and not numbers and len(line) > 3:
+                current_subject = line
+
+        if extracted_numbers:
+            while len(extracted_numbers) < 10:
+                extracted_numbers.append("0")
+                
+            s_dict = {
+                "Subject": current_subject if current_subject else "Detected Subject",
+                "Unit-1": extracted_numbers[0],
+                "Unit-2": extracted_numbers[1],
+                "Unit-3(1)": extracted_numbers[2],
+                "Obj-1(A)": extracted_numbers[3],
+                "Assignment-1(A)": extracted_numbers[4],
+                "Unit-3(2)": extracted_numbers[5],
+                "Unit-4": extracted_numbers[6],
+                "Unit-5": extracted_numbers[7],
+                "Obj-2(A)": extracted_numbers[8],
+                "Assignment-2(A)": extracted_numbers[9],
+            }
+            final_rows.append(s_dict)
+        else:
+            # Fallback row if no clear sequences detected
             final_rows.append({
-                "Subject": "Extracted Data View",
+                "Subject": "Parsed Output Raw",
                 "Unit-1": "0", "Unit-2": "0", "Unit-3(1)": "0", "Obj-1(A)": "0", "Assignment-1(A)": "0",
                 "Unit-3(2)": "0", "Unit-4": "0", "Unit-5": "0", "Obj-2(A)": "0", "Assignment-2(A)": "0"
             })
