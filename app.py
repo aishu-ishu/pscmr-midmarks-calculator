@@ -252,6 +252,7 @@ import gc
 import io
 import math
 import cv2
+import concurrent.futures
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 import numpy as np
@@ -311,6 +312,41 @@ def calculate_analytics(
         "Required_Sem_Marks": req_sem,
     }
 
+def ocr_crop_with_api(cell_crop):
+    """Sends individual OpenCV cell crops to OCR.space API"""
+    if not OCR_API_KEY or cell_crop.size == 0:
+        return ""
+    try:
+        success, encoded_image = cv2.imencode('.png', cell_crop)
+        if not success:
+            return ""
+        
+        cell_bytes = encoded_image.tobytes()
+        
+        response = requests.post(
+            "https://api.ocr.space/parse/image",
+            files={"file": ("cell.png", cell_bytes, "image/png")},
+            data={
+                "apikey": OCR_API_KEY,
+                "language": "eng",
+                "isTable": False,
+                "scale": True,
+                "OCREngine": 2
+            },
+            timeout=10
+        )
+        
+        result = response.json()
+        if result.get("IsErroredOnProcessing"):
+            return ""
+            
+        parsed_results = result.get("ParsedResults", [])
+        if parsed_results:
+            return parsed_results[0].get("ParsedText", "").strip()
+    except Exception:
+        pass
+    return ""
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -329,93 +365,185 @@ def process_image():
 
     try:
         image_bytes = file.read()
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         
-        # Send raw uploaded file bytes directly to prevent format corruption
-        response = requests.post(
-            "https://api.ocr.space/parse/image",
-            files={"file": (file.filename, image_bytes, file.content_type or "image/jpeg")},
-            data={
-                "apikey": OCR_API_KEY,
-                "language": "eng",
-                "isTable": False,  # Turned off strict table mode for reliable text recognition
-                "scale": True,
-                "OCREngine": 2     # Engine 2 is much better for numbers and dense marksheet text
-            },
-            timeout=25
+        max_width = 1200
+        if pil_img.width > max_width:
+            ratio = max_width / float(pil_img.width)
+            new_height = int(float(pil_img.height) * ratio)
+            pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+
+        img = np.array(pil_img)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+        thresh = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )[1]
+
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))
+
+        h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
+        v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
+
+        table_grid = cv2.add(h_lines, v_lines)
+
+        contours, _ = cv2.findContours(
+            table_grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
         )
 
-        result = response.json()
-        if result.get("IsErroredOnProcessing"):
-            error_msg = result.get("ErrorMessage", ["OCR processing failed"])[0]
-            return jsonify({"error": error_msg}), 500
+        boxes = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if w > 20 and h > 12 and w < img.shape[1] * 0.9:
+                boxes.append((x, y, w, h))
 
-        parsed_results = result.get("ParsedResults", [])
-        if not parsed_results:
-            return jsonify({"error": f"API returned no results. Raw response: {str(result)}"}), 400
+        if not boxes:
+            return jsonify({"error": "Could not detect table grid lines"}), 400
 
-        extracted_text = parsed_results[0].get("ParsedText", "").strip()
-        if not extracted_text:
-            return jsonify({"error": "OCR engine read the image, but found 0 characters. Try uploading a clearer, higher-resolution image."}), 400
+        boxes = sorted(boxes, key=lambda b: b[1])
 
-        lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
+        row_threshold = 12
+        grid_rows = []
+        for box in boxes:
+            placed = False
+            for r in grid_rows:
+                avg_y = sum(b[1] for b in r) / len(r)
+                if abs(box[1] - avg_y) < row_threshold:
+                    r.append(box)
+                    placed = True
+                    break
+            if not placed:
+                grid_rows.append([box])
+
+        for r in grid_rows:
+            r.sort(key=lambda b: b[0])
+
+        # Prepare all cell crops for concurrent parallel processing
+        cell_tasks = []
+        for r_idx, r in enumerate(grid_rows):
+            for c_idx, (x, y, w, h) in enumerate(r):
+                cell_crop = img[y + 2 : y + h - 2, x + 2 : x + w - 2]
+                cell_tasks.append((r_idx, c_idx, cell_crop))
+
+        def process_single_cell(task):
+            r_idx, c_idx, cell_crop = task
+            text = ocr_crop_with_api(cell_crop)
+            return r_idx, c_idx, text
+
+        # Execute all cell OCR requests in parallel threads (lightning fast)
+        extracted_grid_map = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+            future_results = executor.map(process_single_cell, cell_tasks)
+            for r_idx, c_idx, cell_text in future_results:
+                if r_idx not in extracted_grid_map:
+                    extracted_grid_map[r_idx] = {}
+                extracted_grid_map[r_idx][c_idx] = cell_text
+
+        # Reconstruct the 2D grid matrix
+        extracted_grid = []
+        for r_idx in sorted(extracted_grid_map.keys()):
+            row_dict = extracted_grid_map[r_idx]
+            row_texts = [row_dict.get(c_idx, "") for c_idx in sorted(row_dict.keys())]
+            extracted_grid.append(row_texts)
+
+        if not extracted_grid:
+            return jsonify({"error": "Failed to extract text from grid cells."}), 400
+
+        header_row = extracted_grid[0]
+        
+        subjects = []
+        subject_col_indices = []
+        for idx, text in enumerate(header_row):
+            cleaned = text.strip()
+            if idx > 0 and cleaned.lower() not in ["subject", "total", ""] and len(cleaned) > 0:
+                subjects.append(cleaned)
+                subject_col_indices.append(idx)
+
+        if not subjects and len(extracted_grid) > 0:
+            num_cols = len(header_row)
+            for idx in range(1, num_cols):
+                subjects.append(header_row[idx] if header_row[idx] else f"Subject_{idx}")
+                subject_col_indices.append(idx)
+
+        target_columns = [
+            "Unit-1", "Unit-2", "Unit-3(1)", "Obj-1(A)", "Assignment-1(A)", "Internal-I total",
+            "Unit-3(2)", "Unit-4", "Unit-5", "Obj-2(A)", "Assignment-2(A)", "Internal-II total"
+        ]
+
+        metric_map = {
+            "unit-3(2)": "Unit-3(2)",
+            "unit-3.2": "Unit-3(2)",
+            "unit-3 (2)": "Unit-3(2)",
+            "unit-3(1)": "Unit-3(1)",
+            "unit-3.1": "Unit-3(1)",
+            "unit-3": "Unit-3(1)",
+            "unit-1": "Unit-1",
+            "unit-2": "Unit-2",
+            "obj-1(a)": "Obj-1(A)",
+            "obj-i(a)": "Obj-1(A)",
+            "assignment-1(a)": "Assignment-1(A)",
+            "assignment-i(a)": "Assignment-1(A)",
+            "internal-i total": "Internal-I total",
+            "unit-4": "Unit-4",
+            "unit-5": "Unit-5",
+            "obj-2(a)": "Obj-2(A)",
+            "assignment-2(a)": "Assignment-2(A)",
+            "internal-ii total": "Internal-II total",
+        }
+
+        subject_data = {s: {col: None for col in target_columns} for s in subjects}
+
+        for r_idx in range(1, len(extracted_grid)):
+            row = extracted_grid[r_idx]
+            if not row:
+                continue
+
+            raw_label = row[0].lower().strip()
+            matched_key = None
+            
+            for k, v in metric_map.items():
+                if k in raw_label:
+                    matched_key = v
+                    break
+            
+            if not matched_key and 0 < r_idx <= len(target_columns):
+                matched_key = target_columns[r_idx - 1]
+
+            if not matched_key:
+                continue
+
+            for s_idx, subject in enumerate(subjects):
+                col_idx = subject_col_indices[s_idx] if s_idx < len(subject_col_indices) else (s_idx + 1)
+                if col_idx < len(row):
+                    cell_val = row[col_idx].replace(" ", "")
+                    if cell_val and cell_val not in ["-", "--", "None", "null", "."]:
+                        subject_data[subject][matched_key] = cell_val
 
         final_rows = []
-        current_subject = "Subject 1"
-        extracted_numbers = []
+        for s in subjects:
+            s_dict = {"Subject": s}
+            s_dict.update(subject_data[s])
 
-        for line in lines:
-            words = line.split()
-            numbers = [w for w in words if w.replace('.', '', 1).isdigit()]
-            if len(numbers) >= 3:
-                extracted_numbers.extend(numbers)
-            elif len(words) > 0 and not numbers and len(line) > 3:
-                current_subject = line
-
-        if extracted_numbers:
-            while len(extracted_numbers) < 10:
-                extracted_numbers.append("0")
-                
-            s_dict = {
-                "Subject": current_subject,
-                "Unit-1": extracted_numbers[0],
-                "Unit-2": extracted_numbers[1],
-                "Unit-3(1)": extracted_numbers[2],
-                "Obj-1(A)": extracted_numbers[3],
-                "Assignment-1(A)": extracted_numbers[4],
-                "Unit-3(2)": extracted_numbers[5],
-                "Unit-4": extracted_numbers[6],
-                "Unit-5": extracted_numbers[7],
-                "Obj-2(A)": extracted_numbers[8],
-                "Assignment-2(A)": extracted_numbers[9],
-            }
-            final_rows.append(s_dict)
-        else:
-            final_rows.append({
-                "Subject": "Extracted Text: " + extracted_text[:30],
-                "Unit-1": "0", "Unit-2": "0", "Unit-3(1)": "0", "Obj-1(A)": "0", "Assignment-1(A)": "0",
-                "Unit-3(2)": "0", "Unit-4": "0", "Unit-5": "0", "Obj-2(A)": "0", "Assignment-2(A)": "0"
-            })
-
-        for s_dict in final_rows:
             analytics = calculate_analytics(
-                u1=s_dict.get("Unit-1"),
-                u2=s_dict.get("Unit-2"),
-                u3=s_dict.get("Unit-3(1)"),
-                obj=s_dict.get("Obj-1(A)"),
-                assign=s_dict.get("Assignment-1(A)"),
-                mid2_u1=s_dict.get("Unit-3(2)"),
-                mid2_u2=s_dict.get("Unit-4"),
-                mid2_u3=s_dict.get("Unit-5"),
-                mid2_obj=s_dict.get("Obj-2(A)"),
-                mid2_assign=s_dict.get("Assignment-2(A)"),
+                u1=s_dict["Unit-1"],
+                u2=s_dict["Unit-2"],
+                u3=s_dict["Unit-3(1)"],
+                obj=s_dict["Obj-1(A)"],
+                assign=s_dict["Assignment-1(A)"],
+                mid2_u1=s_dict["Unit-3(2)"],
+                mid2_u2=s_dict["Unit-4"],
+                mid2_u3=s_dict["Unit-5"],
+                mid2_obj=s_dict["Obj-2(A)"],
+                mid2_assign=s_dict["Assignment-2(A)"],
             )
+
             s_dict.update(analytics)
+            final_rows.append(s_dict)
 
         gc.collect()
         return jsonify({"rows": final_rows})
 
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "OCR API request timed out."}), 504
     except Exception as e:
         gc.collect()
         return jsonify({"error": str(e)}), 500
