@@ -141,25 +141,22 @@ def process_image():
                     continue
                 cell_pil = Image.fromarray(cell_crop)
                 
-                # Use fast LSTM engine (--oem 1) and single-line mode (--psm 7)
                 cell_text = pytesseract.image_to_string(
                     cell_pil, config="--oem 1 --psm 7"
                 ).strip()
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
+        # Filter header to find subjects
         header_row = extracted_grid[0]
         subjects = [
             s for s in header_row if s.lower() not in ["subject", "total", ""]
         ]
 
+        # Expand target columns to cover both Internal-I and Internal-II rows
         target_columns = [
-            "Unit-1",
-            "Unit-2",
-            "Unit-3(1)",
-            "Obj-1(A)",
-            "Assignment-1(A)",
-            "Internal-I total",
+            "Unit-1", "Unit-2", "Unit-3(1)", "Obj-1(A)", "Assignment-1(A)", "Internal-I total",
+            "Unit-3(2)", "Unit-4", "Unit-5", "Obj-2(A)", "Assignment-2(A)", "Internal-II total"
         ]
 
         metric_map = {
@@ -172,6 +169,12 @@ def process_image():
             "assignment-1(a)": "Assignment-1(A)",
             "assignment-i(a)": "Assignment-1(A)",
             "internal-i total": "Internal-I total",
+            "unit-3(2)": "Unit-3(2)",
+            "unit-4": "Unit-4",
+            "unit-5": "Unit-5",
+            "obj-2(a)": "Obj-2(A)",
+            "assignment-2(a)": "Assignment-2(A)",
+            "internal-ii total": "Internal-II total",
         }
 
         subject_data = {s: {col: None for col in target_columns} for s in subjects}
@@ -202,12 +205,18 @@ def process_image():
             s_dict = {"Subject": s}
             s_dict.update(subject_data[s])
 
+            # Pass both Internal 1 and Internal 2 metrics into analytics calculation
             analytics = calculate_analytics(
                 u1=s_dict["Unit-1"],
                 u2=s_dict["Unit-2"],
                 u3=s_dict["Unit-3(1)"],
                 obj=s_dict["Obj-1(A)"],
                 assign=s_dict["Assignment-1(A)"],
+                mid2_u1=s_dict["Unit-3(2)"],
+                mid2_u2=s_dict["Unit-4"],
+                mid2_u3=s_dict["Unit-5"],
+                mid2_obj=s_dict["Obj-2(A)"],
+                mid2_assign=s_dict["Assignment-2(A)"],
             )
 
             s_dict.update(analytics)
