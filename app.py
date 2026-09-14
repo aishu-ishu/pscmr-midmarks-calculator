@@ -63,6 +63,10 @@ def calculate_analytics(
 def home():
     return render_template("index.html")
 
+@app.route("/guide")
+def guide_page():
+    return render_template("bs.html")
+
 @app.route("/process-image", methods=["POST"])
 def process_image():
     if "file" not in request.files:
@@ -243,9 +247,6 @@ def process_image():
     except Exception as e:
         gc.collect()
         return jsonify({"error": str(e)}), 500
-@app.route("/")
-def index():
-    return render_template("bs.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
