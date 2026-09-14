@@ -329,28 +329,17 @@ def process_image():
 
     try:
         image_bytes = file.read()
-        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         
-        max_width = 1200
-        if pil_img.width > max_width:
-            ratio = max_width / float(pil_img.width)
-            new_height = int(float(pil_img.height) * ratio)
-            pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
-
-        # Convert image to bytes for a single single-pass API call
-        buffered = io.BytesIO()
-        pil_img.save(buffered, format="JPEG", quality=85)
-        img_bytes_single = buffered.getvalue()
-
-        # SINGLE API CALL to OCR.space with table engine enabled
+        # Send raw uploaded file bytes directly to prevent format corruption
         response = requests.post(
             "https://api.ocr.space/parse/image",
-            files={"file": (file.filename, img_bytes_single, "image/jpeg")},
+            files={"file": (file.filename, image_bytes, file.content_type or "image/jpeg")},
             data={
                 "apikey": OCR_API_KEY,
                 "language": "eng",
-                "isTable": True,
-                "scale": True
+                "isTable": False,  # Turned off strict table mode for reliable text recognition
+                "scale": True,
+                "OCREngine": 2     # Engine 2 is much better for numbers and dense marksheet text
             },
             timeout=25
         )
@@ -362,9 +351,12 @@ def process_image():
 
         parsed_results = result.get("ParsedResults", [])
         if not parsed_results:
-            return jsonify({"error": "Could not extract text from image"}), 400
+            return jsonify({"error": f"API returned no results. Raw response: {str(result)}"}), 400
 
-        extracted_text = parsed_results[0].get("ParsedText", "")
+        extracted_text = parsed_results[0].get("ParsedText", "").strip()
+        if not extracted_text:
+            return jsonify({"error": "OCR engine read the image, but found 0 characters. Try uploading a clearer, higher-resolution image."}), 400
+
         lines = [line.strip() for line in extracted_text.splitlines() if line.strip()]
 
         final_rows = []
@@ -398,9 +390,8 @@ def process_image():
             }
             final_rows.append(s_dict)
         else:
-            # Fallback safe row matching your template structure
             final_rows.append({
-                "Subject": "Extracted Data View",
+                "Subject": "Extracted Text: " + extracted_text[:30],
                 "Unit-1": "0", "Unit-2": "0", "Unit-3(1)": "0", "Obj-1(A)": "0", "Assignment-1(A)": "0",
                 "Unit-3(2)": "0", "Unit-4": "0", "Unit-5": "0", "Obj-2(A)": "0", "Assignment-2(A)": "0"
             })
