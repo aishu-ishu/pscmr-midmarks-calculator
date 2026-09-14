@@ -256,7 +256,6 @@ import cv2
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 import numpy as np
-import pandas as pd
 from PIL import Image
 import pytesseract
 
@@ -379,22 +378,24 @@ def process_image():
         for r in grid_rows:
             r.sort(key=lambda b: b[0])
 
-        # SINGLE OCR PASS: Extract all text coordinates at once instead of looping cells
-        ocr_df = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DATAFRAME)
-        ocr_df = ocr_df[ocr_df.text.notnull() & (ocr_df.text.str.strip() != "")]
-
+        # SINGLE OCR PASS using DICT to avoid requiring pandas
+        ocr_data = pytesseract.image_to_data(pil_img, output_type=pytesseract.Output.DICT)
+        
         extracted_grid = []
         for r in grid_rows:
             row_texts = []
             for x, y, w, h in r:
-                # Find words whose center falls inside this cell box
-                cell_words = ocr_df[
-                    (ocr_df['left'] >= x) & 
-                    (ocr_df['left'] + ocr_df['width'] <= x + w) & 
-                    (ocr_df['top'] >= y) & 
-                    (ocr_df['top'] + ocr_df['height'] <= y + h)
-                ]
-                cell_text = " ".join(cell_words['text'].tolist()).strip()
+                cell_words = []
+                for i in range(len(ocr_data['text'])):
+                    txt = ocr_data['text'][i].strip()
+                    if not txt:
+                        continue
+                    lx, ly, lw, lh = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
+                    # Check if word falls inside this cell bounding box
+                    if lx >= x and (lx + lw) <= (x + w) and ly >= y and (ly + lh) <= (y + h):
+                        cell_words.append(txt)
+                
+                cell_text = " ".join(cell_words).strip()
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
