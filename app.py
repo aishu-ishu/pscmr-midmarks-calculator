@@ -33,14 +33,12 @@ def round_half_up(n):
 def calculate_analytics(
     u1, u2, u3, obj, assign, mid2_u1=0, mid2_u2=0, mid2_u3=0, mid2_obj=0, mid2_assign=0
 ):
-    m1_units = round_half_up(
-        (parse_score(u1) + parse_score(u2) + parse_score(u3)) / 2.0
-    )
+    m1_units_sum = parse_score(u1) + parse_score(u2) + parse_score(u3)
+    m1_units = round_half_up(m1_units_sum / 2.0)
     mid1_total = int(m1_units + parse_score(obj) + parse_score(assign))
 
-    m2_units = round_half_up(
-        (parse_score(mid2_u1) + parse_score(mid2_u2) + parse_score(mid2_u3)) / 2.0
-    )
+    m2_units_sum = parse_score(mid2_u1) + parse_score(mid2_u2) + parse_score(mid2_u3)
+    m2_units = round_half_up(m2_units_sum / 2.0)
     mid2_total = int(m2_units + parse_score(mid2_obj) + parse_score(mid2_assign))
 
     best_mid = max(mid1_total, mid2_total)
@@ -78,7 +76,6 @@ def process_image():
         image_bytes = file.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         
-        # Downscale large phone images to max width 1200px for massive speed gains
         max_width = 1200
         if pil_img.width > max_width:
             ratio = max_width / float(pil_img.width)
@@ -147,13 +144,11 @@ def process_image():
                 row_texts.append(cell_text)
             extracted_grid.append(row_texts)
 
-        # Filter header to find subjects
         header_row = extracted_grid[0]
         subjects = [
             s for s in header_row if s.lower() not in ["subject", "total", ""]
         ]
 
-        # Expand target columns to cover both Internal-I and Internal-II rows
         target_columns = [
             "Unit-1", "Unit-2", "Unit-3(1)", "Obj-1(A)", "Assignment-1(A)", "Internal-I total",
             "Unit-3(2)", "Unit-4", "Unit-5", "Obj-2(A)", "Assignment-2(A)", "Internal-II total"
@@ -205,7 +200,6 @@ def process_image():
             s_dict = {"Subject": s}
             s_dict.update(subject_data[s])
 
-            # Pass both Internal 1 and Internal 2 metrics into analytics calculation
             analytics = calculate_analytics(
                 u1=s_dict["Unit-1"],
                 u2=s_dict["Unit-2"],
