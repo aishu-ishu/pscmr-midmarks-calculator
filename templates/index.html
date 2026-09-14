@@ -484,11 +484,7 @@
 </div>
 <div class="container">
     <div class="upload-card">
-        <!-- Styled header to match the bullet point size below -->
-        <p style="color: red; font-weight: 700; font-size: 1.05rem; margin-top: 0; margin-bottom: 15px; text-align: center;">
-            Upload Image and get your mid average
-        </p>
-        
+        <h2>Upload Image and get your mid average</h2>
         <input type="file" id="imageInput" accept="image/*" onchange="previewImage(event)">
         <br>
         <img id="preview" alt="Selected Image Preview">
@@ -499,14 +495,14 @@
         </div>
 
         <!-- Enlarged reference examples -->
-        <div style="margin-top: 35px; border-top: 1px solid #e5e7eb; padding-top: 25px; text-align: left;">
-            <p style="color: red; font-weight: 700; font-size: 1.05rem; margin-bottom: 20px;">• Upload image should look like:</p>
+        <div style="margin-top: 35px; border-top: 1px solid #e5e7eb; padding-top: 25px; text-align: center;">
+            <p style="color: red; font-weight: 700; font-size: 1.5rem; margin-bottom: 20px; text-align: center;">Upload image should look like:</p>
             <div style="display: flex; flex-direction: column; gap: 30px; max-width: 700px; margin: 0 auto;">
-                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px;">
+                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
                     <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 1:</p>
                     <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image 1" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
                 </div>
-                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px;">
+                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
                     <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 2:</p>
                     <img src="{{ url_for('static', filename='y.jpg') }}" alt="sample image 2" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
                 </div>
