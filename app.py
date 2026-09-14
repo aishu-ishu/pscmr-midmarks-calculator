@@ -243,6 +243,9 @@ def process_image():
     except Exception as e:
         gc.collect()
         return jsonify({"error": str(e)}), 500
+@app.route("/guide")
+def guide_page():
+    return render_template("bs.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
