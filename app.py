@@ -1,9 +1,13 @@
 import os
 import gc
+import io
 import math
-import re
+import cv2
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
+import numpy as np
+from PIL import Image
+import pytesseract
 
 app = Flask(__name__)
 CORS(app)
@@ -49,11 +53,11 @@ def calculate_analytics(
     req_sem = max(24, 40 - final_mid_avg)
 
     return {
-        "Mid1_Score": min(30, mid1_total),
-        "Mid2_Score": min(30, mid2_total),
-        "Best_Mid_80": min(30, best_80),
-        "Other_Mid_20": min(30, other_20),
-        "Final_Mid_Average": min(30, final_mid_avg),
+        "Mid1_Score": mid1_total,
+        "Mid2_Score": mid2_total,
+        "Best_Mid_80": best_80,
+        "Other_Mid_20": other_20,
+        "Final_Mid_Average": final_mid_avg,
         "Required_Sem_Marks": req_sem,
     }
 
@@ -61,39 +65,153 @@ def calculate_analytics(
 def home():
     return render_template("index.html")
 
-@app.route("/parse-text", methods=["POST"])
-def parse_text():
-    data = request.get_json()
-    extracted_text = data.get("extracted_text", "")
-    
-    if not extracted_text:
-        return jsonify({"error": "No text received"}), 400
+@app.route("/process-image", methods=["POST"])
+def process_image():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
 
     try:
-        lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
+        image_bytes = file.read()
+        pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         
-        # Extract all numbers from the client-side text output
-        numbers = []
-        for line in lines:
-            found = re.findall(r'\b\d+(?:\.\d+)?\b', line)
-            if found:
-                numbers.extend([float(n) for n in found])
+        # Downscale large phone images to max width 1200px for massive speed gains
+        max_width = 1200
+        if pil_img.width > max_width:
+            ratio = max_width / float(pil_img.width)
+            new_height = int(float(pil_img.height) * ratio)
+            pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
 
-        # Filter realistic mark values (0 to 30 range)
-        valid_marks = [n for n in numbers if 0 <= n <= 30]
+        img = np.array(pil_img)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
-        u1 = valid_marks[0] if len(valid_marks) > 0 else 10
-        u2 = valid_marks[1] if len(valid_marks) > 1 else 10
-        u3 = valid_marks[2] if len(valid_marks) > 2 else 10
-        obj = valid_marks[3] if len(valid_marks) > 3 else 4
-        assign = valid_marks[4] if len(valid_marks) > 4 else 4
+        thresh = cv2.threshold(
+            gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )[1]
 
-        analytics = calculate_analytics(u1=u1, u2=u2, u3=u3, obj=obj, assign=assign)
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))
 
-        final_rows = [{
-            "Subject": "Parsed Subject",
-            **analytics
-        }]
+        h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel)
+        v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel)
+
+        table_grid = cv2.add(h_lines, v_lines)
+
+        contours, _ = cv2.findContours(
+            table_grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        boxes = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if w > 20 and h > 12 and w < img.shape[1] * 0.9:
+                boxes.append((x, y, w, h))
+
+        if not boxes:
+            return jsonify({"error": "Could not detect table grid lines"}), 400
+
+        boxes = sorted(boxes, key=lambda b: b[1])
+
+        row_threshold = 12
+        grid_rows = []
+        for box in boxes:
+            placed = False
+            for r in grid_rows:
+                avg_y = sum(b[1] for b in r) / len(r)
+                if abs(box[1] - avg_y) < row_threshold:
+                    r.append(box)
+                    placed = True
+                    break
+            if not placed:
+                grid_rows.append([box])
+
+        for r in grid_rows:
+            r.sort(key=lambda b: b[0])
+
+        extracted_grid = []
+        for r in grid_rows:
+            row_texts = []
+            for x, y, w, h in r:
+                cell_crop = img[y + 2 : y + h - 2, x + 2 : x + w - 2]
+                if cell_crop.size == 0:
+                    row_texts.append("")
+                    continue
+                cell_pil = Image.fromarray(cell_crop)
+                
+                # Use fast LSTM engine (--oem 1) and single-line mode (--psm 7)
+                cell_text = pytesseract.image_to_string(
+                    cell_pil, config="--oem 1 --psm 7"
+                ).strip()
+                row_texts.append(cell_text)
+            extracted_grid.append(row_texts)
+
+        header_row = extracted_grid[0]
+        subjects = [
+            s for s in header_row if s.lower() not in ["subject", "total", ""]
+        ]
+
+        target_columns = [
+            "Unit-1",
+            "Unit-2",
+            "Unit-3(1)",
+            "Obj-1(A)",
+            "Assignment-1(A)",
+            "Internal-I total",
+        ]
+
+        metric_map = {
+            "unit-1": "Unit-1",
+            "unit-2": "Unit-2",
+            "unit-3(1)": "Unit-3(1)",
+            "unit-3": "Unit-3(1)",
+            "obj-1(a)": "Obj-1(A)",
+            "obj-i(a)": "Obj-1(A)",
+            "assignment-1(a)": "Assignment-1(A)",
+            "assignment-i(a)": "Assignment-1(A)",
+            "internal-i total": "Internal-I total",
+        }
+
+        subject_data = {s: {col: None for col in target_columns} for s in subjects}
+
+        for r_idx in range(1, len(extracted_grid)):
+            row = extracted_grid[r_idx]
+            if not row:
+                continue
+
+            raw_label = row[0].lower().strip()
+            matched_key = None
+            for k, v in metric_map.items():
+                if k in raw_label:
+                    matched_key = v
+                    break
+            if not matched_key:
+                continue
+
+            for s_idx, subject in enumerate(subjects):
+                col_idx = s_idx + 1
+                if col_idx < len(row):
+                    cell_val = row[col_idx].replace(" ", "")
+                    if cell_val and cell_val not in ["-", "--", "None", "null"]:
+                        subject_data[subject][matched_key] = cell_val
+
+        final_rows = []
+        for s in subjects:
+            s_dict = {"Subject": s}
+            s_dict.update(subject_data[s])
+
+            analytics = calculate_analytics(
+                u1=s_dict["Unit-1"],
+                u2=s_dict["Unit-2"],
+                u3=s_dict["Unit-3(1)"],
+                obj=s_dict["Obj-1(A)"],
+                assign=s_dict["Assignment-1(A)"],
+            )
+
+            s_dict.update(analytics)
+            final_rows.append(s_dict)
 
         gc.collect()
         return jsonify({"rows": final_rows})
