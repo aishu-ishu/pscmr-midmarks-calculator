@@ -247,12 +247,14 @@
 # if __name__ == "__main__":
 #     port = int(os.environ.get("PORT", 5000))
 #     app.run(host="0.0.0.0", port=port, debug=False)
+
+
+
 import os
 import gc
 import io
 import math
 import cv2
-import concurrent.futures
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 import numpy as np
@@ -312,41 +314,6 @@ def calculate_analytics(
         "Required_Sem_Marks": req_sem,
     }
 
-def ocr_crop_with_api(cell_crop):
-    """Sends individual OpenCV cell crops to OCR.space API concurrently"""
-    if not OCR_API_KEY or cell_crop.size == 0:
-        return ""
-    try:
-        success, encoded_image = cv2.imencode('.png', cell_crop)
-        if not success:
-            return ""
-        
-        cell_bytes = encoded_image.tobytes()
-        
-        response = requests.post(
-            "https://api.ocr.space/parse/image",
-            files={"file": ("cell.png", cell_bytes, "image/png")},
-            data={
-                "apikey": OCR_API_KEY,
-                "language": "eng",
-                "isTable": False,
-                "scale": True,
-                "OCREngine": 2
-            },
-            timeout=8
-        )
-        
-        result = response.json()
-        if result.get("IsErroredOnProcessing"):
-            return ""
-            
-        parsed_results = result.get("ParsedResults", [])
-        if parsed_results:
-            return parsed_results[0].get("ParsedText", "").strip()
-    except Exception:
-        pass
-    return ""
-
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -373,6 +340,49 @@ def process_image():
             new_height = int(float(pil_img.height) * ratio)
             pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
 
+        # Single API call to OCR.space with coordinate overlay enabled
+        buffered = io.BytesIO()
+        pil_img.save(buffered, format="JPEG", quality=85)
+        img_bytes_optimized = buffered.getvalue()
+
+        response = requests.post(
+            "https://api.ocr.space/parse/image",
+            files={"file": (file.filename, img_bytes_optimized, "image/jpeg")},
+            data={
+                "apikey": OCR_API_KEY,
+                "language": "eng",
+                "isOverlayRequired": True,
+                "scale": True,
+                "OCREngine": 2
+            },
+            timeout=25
+        )
+
+        result = response.json()
+        if result.get("IsErroredOnProcessing"):
+            error_msg = result.get("ErrorMessage", ["OCR processing failed"])[0]
+            return jsonify({"error": error_msg}), 500
+
+        parsed_results = result.get("ParsedResults", [])
+        if not parsed_results:
+            return jsonify({"error": "Could not extract text from image"}), 400
+
+        # Extract all text words with their absolute coordinates
+        text_overlay = parsed_results[0].get("TextOverlay", {})
+        overlay_lines = text_overlay.get("Lines", [])
+        
+        ocr_words = []
+        for line in overlay_lines:
+            for word_item in line.get("Words", []):
+                ocr_words.append({
+                    "text": word_item.get("WordText", "").strip(),
+                    "left": word_item.get("Left", 0),
+                    "top": word_item.get("Top", 0),
+                    "width": word_item.get("Width", 0),
+                    "height": word_item.get("Height", 0)
+                })
+
+        # OpenCV Grid Detection (Your exact working table parser)
         img = np.array(pil_img)
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
 
@@ -419,35 +429,23 @@ def process_image():
         for r in grid_rows:
             r.sort(key=lambda b: b[0])
 
-        # Prepare all cell crops for concurrent thread pool execution
-        cell_tasks = []
-        for r_idx, r in enumerate(grid_rows):
-            for c_idx, (x, y, w, h) in enumerate(r):
-                cell_crop = img[y + 2 : y + h - 2, x + 2 : x + w - 2]
-                cell_tasks.append((r_idx, c_idx, cell_crop))
-
-        def process_single_cell(task):
-            r_idx, c_idx, cell_crop = task
-            text = ocr_crop_with_api(cell_crop)
-            return r_idx, c_idx, text
-
-        extracted_grid_map = {}
-        # Fire 12 parallel API requests simultaneously to slash processing time from minutes to ~2 seconds
-        with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
-            future_results = executor.map(process_single_cell, cell_tasks)
-            for r_idx, c_idx, cell_text in future_results:
-                if r_idx not in extracted_grid_map:
-                    extracted_grid_map[r_idx] = {}
-                extracted_grid_map[r_idx][c_idx] = cell_text
-
+        # Map API words into OpenCV grid cells based on coordinates
         extracted_grid = []
-        for r_idx in sorted(extracted_grid_map.keys()):
-            row_dict = extracted_grid_map[r_idx]
-            row_texts = [row_dict.get(c_idx, "") for c_idx in sorted(row_dict.keys())]
+        for r in grid_rows:
+            row_texts = []
+            for x, y, w, h in r:
+                cell_words = []
+                for ow in ocr_words:
+                    # Check if word center falls inside the cell box (with padding)
+                    wx = ow["left"] + ow["width"] / 2.0
+                    wy = ow["top"] + ow["height"] / 2.0
+                    if (x - 2 <= wx <= x + w + 2) and (y - 2 <= wy <= y + h + 2):
+                        cell_words.append(ow["text"])
+                row_texts.append(" ".join(cell_words))
             extracted_grid.append(row_texts)
 
-        if not extracted_grid:
-            return jsonify({"error": "Failed to extract text from grid cells."}), 400
+        if not extracted_grid or len(extracted_grid) == 0:
+            return jsonify({"error": "Failed to map extracted text to grid cells."}), 400
 
         header_row = extracted_grid[0]
         
