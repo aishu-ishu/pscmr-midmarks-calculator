@@ -245,7 +245,7 @@ def process_image():
         return jsonify({"error": str(e)}), 500
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("bs.html")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
