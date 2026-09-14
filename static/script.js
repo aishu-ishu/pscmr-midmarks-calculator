@@ -7,10 +7,9 @@ function startTimer() {
     loading.style.display = 'inline-block';
     loading.style.color = 'var(--primary)';
     
-    // Fast counter in seconds during processing
     timerInterval = setInterval(() => {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        loading.innerText = `Processing... (${elapsed}s)`;
+        loading.innerText = `Processing in browser... (${elapsed}s)`;
     }, 100);
 }
 
@@ -22,7 +21,7 @@ function stopTimer() {
     
     const loading = document.getElementById('loading');
     loading.style.display = 'inline-block';
-    loading.style.color = '#16a34a'; // Success green
+    loading.style.color = '#16a34a'; 
     loading.innerText = `Completed in ${mins}m ${secs}s`;
 }
 
@@ -48,37 +47,41 @@ async function uploadImage() {
         return;
     }
 
-    const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
-
+    const imageFile = fileInput.files[0];
     container.innerHTML = '';
-    
     startTimer();
 
     try {
-        const response = await fetch('/process-image', {
+        // Run OCR completely client-side via Tesseract.js
+        const { data: { text } } = await Tesseract.recognize(
+            imageFile,
+            'eng',
+            { 
+                logger: m => console.log(m.progress) 
+            }
+        );
+
+        // Send lightweight extracted text string to Flask
+        const response = await fetch('/parse-text', {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ extracted_text: text })
         });
 
         const data = await response.json();
-        
-        stopTimer(); // This stops the fast counter, computes final duration in min/secs, and leaves it visible permanently
+        stopTimer();
 
         if (!response.ok || data.error) {
-            container.innerHTML = `<div style="color:red; text-align:center;">${data.error || 'Failed to process image'}</div>`;
+            container.innerHTML = `<div style="color:red; text-align:center;">${data.error || 'Failed to parse text'}</div>`;
             return;
         }
 
-        // Render Card for each Subject
+        // Render Cards for each Subject
         data.rows.forEach(subject => {
             const cardHTML = `
                 <div class="subject-card">
-                    <div class="card-header">
-                         Subject: ${subject.Subject}
-                    </div>
+                    <div class="card-header">Subject: ${subject.Subject}</div>
                     <div class="card-body">
-                        <!-- Mid 1 & Mid 2 Top Grid -->
                         <div class="grid-2">
                             <div class="metric-box best">
                                 <div class="box-title">Mid Exam 1 Score</div>
@@ -86,15 +89,12 @@ async function uploadImage() {
                                 <div class="box-sub">out of 30</div>
                                 <span class="badge-best">Best</span>
                             </div>
-
                             <div class="metric-box">
                                 <div class="box-title">Mid Exam 2 Score</div>
                                 <div class="box-value">${subject.Mid2_Score}</div>
                                 <div class="box-sub">out of 30</div>
                             </div>
                         </div>
-
-                        <!-- Weightage Banner -->
                         <div class="weightage-banner">
                             <div class="w-item">
                                 <span class="w-label">Best Mid (80%)</span>
@@ -105,23 +105,18 @@ async function uploadImage() {
                                 <span class="w-val">${subject.Other_Mid_20}</span>
                             </div>
                         </div>
-
-                        <!-- Bottom Final Summary Grid -->
                         <div class="grid-2">
                             <div class="banner-blue">
                                 <div class="banner-title">Final Mid Average</div>
                                 <div class="banner-val">${subject.Final_Mid_Average}</div>
                                 <div class="banner-sub">out of 30</div>
                             </div>
-
                             <div class="banner-orange">
                                 <div class="banner-title">Required Semester Marks</div>
                                 <div class="banner-val">${subject.Required_Sem_Marks}</div>
                                 <div class="banner-sub">out of 70</div>
                             </div>
                         </div>
-
-                        <!-- Status Footer Pill -->
                         <div class="status-pill">
                             You need ${subject.Required_Sem_Marks} marks in semester exam to pass.
                         </div>
@@ -133,8 +128,8 @@ async function uploadImage() {
 
     } catch (error) {
         stopTimer();
-        loading.style.color = '#dc2626'; // Error red
-        loading.innerText = 'Failed to connect';
-        container.innerHTML = `<div style="color:red; text-align:center;">Error connecting to server.</div>`;
+        loading.style.color = '#dc2626';
+        loading.innerText = 'Processing failed';
+        container.innerHTML = `<div style="color:red; text-align:center;">Error processing image in browser.</div>`;
     }
 }
