@@ -1,6 +1,7 @@
 import os
 import gc
 import math
+import re
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
@@ -48,11 +49,11 @@ def calculate_analytics(
     req_sem = max(24, 40 - final_mid_avg)
 
     return {
-        "Mid1_Score": mid1_total,
-        "Mid2_Score": mid2_total,
-        "Best_Mid_80": best_80,
-        "Other_Mid_20": other_20,
-        "Final_Mid_Average": final_mid_avg,
+        "Mid1_Score": min(30, mid1_total),
+        "Mid2_Score": min(30, mid2_total),
+        "Best_Mid_80": min(30, best_80),
+        "Other_Mid_20": min(30, other_20),
+        "Final_Mid_Average": min(30, final_mid_avg),
         "Required_Sem_Marks": req_sem,
     }
 
@@ -69,12 +70,28 @@ def parse_text():
         return jsonify({"error": "No text received"}), 400
 
     try:
-        # Lightweight parsing of the text string returned by client browser
-        # Default fallback calculation block for demonstration of flow
-        analytics = calculate_analytics(u1=15, u2=15, u3=15, obj=5, assign=5)
+        lines = [line.strip() for line in extracted_text.split("\n") if line.strip()]
         
+        # Extract all numbers from the client-side text output
+        numbers = []
+        for line in lines:
+            found = re.findall(r'\b\d+(?:\.\d+)?\b', line)
+            if found:
+                numbers.extend([float(n) for n in found])
+
+        # Filter realistic mark values (0 to 30 range)
+        valid_marks = [n for n in numbers if 0 <= n <= 30]
+
+        u1 = valid_marks[0] if len(valid_marks) > 0 else 10
+        u2 = valid_marks[1] if len(valid_marks) > 1 else 10
+        u3 = valid_marks[2] if len(valid_marks) > 2 else 10
+        obj = valid_marks[3] if len(valid_marks) > 3 else 4
+        assign = valid_marks[4] if len(valid_marks) > 4 else 4
+
+        analytics = calculate_analytics(u1=u1, u2=u2, u3=u3, obj=obj, assign=assign)
+
         final_rows = [{
-            "Subject": "Parsed Subject (Browser OCR)",
+            "Subject": "Parsed Subject",
             **analytics
         }]
 
