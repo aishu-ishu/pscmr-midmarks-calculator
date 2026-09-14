@@ -1,30 +1,26 @@
 let startTime;
 let timerInterval;
-
 function startTimer() {
     startTime = Date.now();
     const loading = document.getElementById('loading');
     loading.style.display = 'inline-block';
     loading.style.color = 'var(--primary)';
-    
+    // Fast counter in seconds during processing
     timerInterval = setInterval(() => {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        loading.innerText = `Processing in browser... (${elapsed}s)`;
+        loading.innerText = `Processing... (${elapsed}s)`;
     }, 100);
 }
-
 function stopTimer() {
     clearInterval(timerInterval);
     const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
     const mins = Math.floor(elapsedSeconds / 60);
     const secs = elapsedSeconds % 60;
-    
     const loading = document.getElementById('loading');
     loading.style.display = 'inline-block';
-    loading.style.color = '#16a34a'; 
+    loading.style.color = '#16a34a'; // Success green
     loading.innerText = `Completed in ${mins}m ${secs}s`;
 }
-
 function previewImage(event) {
     const reader = new FileReader();
     reader.onload = function() {
@@ -36,52 +32,38 @@ function previewImage(event) {
         reader.readAsDataURL(event.target.files[0]);
     }
 }
-
 async function uploadImage() {
     const fileInput = document.getElementById('imageInput');
     const container = document.getElementById('resultsContainer');
     const loading = document.getElementById('loading');
-
     if (fileInput.files.length === 0) {
         alert('Please select an image first!');
         return;
     }
-
-    const imageFile = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
     container.innerHTML = '';
     startTimer();
-
     try {
-        // Run OCR completely client-side via Tesseract.js
-        const { data: { text } } = await Tesseract.recognize(
-            imageFile,
-            'eng',
-            { 
-                logger: m => console.log(m.progress) 
-            }
-        );
-
-        // Send lightweight extracted text string to Flask
-        const response = await fetch('/parse-text', {
+        const response = await fetch('/process-image', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ extracted_text: text })
+            body: formData
         });
-
         const data = await response.json();
-        stopTimer();
-
+        stopTimer(); // This stops the fast counter, computes final duration in min/secs, and leaves it visible permanently
         if (!response.ok || data.error) {
-            container.innerHTML = `<div style="color:red; text-align:center;">${data.error || 'Failed to parse text'}</div>`;
+            container.innerHTML = `<div style="color:red; text-align:center;">${data.error || 'Failed to process image'}</div>`;
             return;
         }
-
-        // Render Cards for each Subject
+        // Render Card for each Subject
         data.rows.forEach(subject => {
             const cardHTML = `
                 <div class="subject-card">
-                    <div class="card-header">Subject: ${subject.Subject}</div>
+                    <div class="card-header">
+                         Subject: ${subject.Subject}
+                    </div>
                     <div class="card-body">
+                        <!-- Mid 1 & Mid 2 Top Grid -->
                         <div class="grid-2">
                             <div class="metric-box best">
                                 <div class="box-title">Mid Exam 1 Score</div>
@@ -95,6 +77,7 @@ async function uploadImage() {
                                 <div class="box-sub">out of 30</div>
                             </div>
                         </div>
+                        <!-- Weightage Banner -->
                         <div class="weightage-banner">
                             <div class="w-item">
                                 <span class="w-label">Best Mid (80%)</span>
@@ -105,6 +88,7 @@ async function uploadImage() {
                                 <span class="w-val">${subject.Other_Mid_20}</span>
                             </div>
                         </div>
+                        <!-- Bottom Final Summary Grid -->
                         <div class="grid-2">
                             <div class="banner-blue">
                                 <div class="banner-title">Final Mid Average</div>
@@ -117,6 +101,7 @@ async function uploadImage() {
                                 <div class="banner-sub">out of 70</div>
                             </div>
                         </div>
+                        <!-- Status Footer Pill -->
                         <div class="status-pill">
                             You need ${subject.Required_Sem_Marks} marks in semester exam to pass.
                         </div>
@@ -125,11 +110,10 @@ async function uploadImage() {
             `;
             container.innerHTML += cardHTML;
         });
-
     } catch (error) {
         stopTimer();
-        loading.style.color = '#dc2626';
-        loading.innerText = 'Processing failed';
-        container.innerHTML = `<div style="color:red; text-align:center;">Error processing image in browser.</div>`;
+        loading.style.color = '#dc2626'; // Error red
+        loading.innerText = 'Failed to connect';
+        container.innerHTML = `<div style="color:red; text-align:center;">Error connecting to server.</div>`;
     }
 }
