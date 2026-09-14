@@ -487,11 +487,6 @@
         <p style="color:red;">• Image extraction and calculation typically take around <strong>1 to 3 minutes</strong> to complete.</p>
         <p style="color:red;">• For more precise analytics and better predictions, providing marks for <strong>both mid-term exams</strong> is recommended.</p>
         <p style="color:red;">• <strong>Maximum users are "2" and if more than 2 users uses your website stucks on loading</strong></p>
-        <p style="color:red;">• Upload image should look like:</p>
-        <div style="display: flex; gap: 8px;">
-            <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image">
-            <img src="{{ url_for('static', filename='y.jpg') }}" alt="demo image">
-        </div>
         <button onclick="closeModal()">Got it, let's begin</button>
     </div>
 </div>
@@ -504,6 +499,11 @@
         <br>
         <div style="display: flex; align-items: center; justify-content: center; gap: 15px; margin-top: 15px; flex-wrap: wrap;">
             <button onclick="uploadImage()">Extract & Calculate Analytics</button>
+            <p style="color:red;">• Upload image should look like:</p>
+        <div style="display: flex; gap: 8px;">
+            <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image">
+            <img src="{{ url_for('static', filename='y.jpg') }}" alt="demo image">
+        </div>
             <span id="loading" style="display: none; font-weight: 600; color: var(--primary); font-size: 0.95rem;"></span>
         </div>
     </div>
