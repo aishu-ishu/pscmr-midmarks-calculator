@@ -482,7 +482,9 @@
         <button onclick="closeModal()">Got it, let's begin</button>
     </div>
 </div>
+
 <div class="container">
+    <!-- Card 1: Upload Section -->
     <div class="upload-card">
         <h2>Upload Image and get your mid average</h2>
         <input type="file" id="imageInput" accept="image/*" onchange="previewImage(event)">
@@ -493,25 +495,28 @@
             <button onclick="uploadImage()">Extract & Calculate Analytics</button>
             <span id="loading" style="display: none; font-weight: 600; color: var(--primary); font-size: 0.95rem;"></span>
         </div>
+    </div>
 
-        <!-- Enlarged reference examples -->
-        <div style="margin-top: 35px; border-top: 1px solid #e5e7eb; padding-top: 25px; text-align: center;">
-            <p style="color: red; font-weight: 700; font-size: 1.5rem; margin-bottom: 20px; text-align: center;">Upload image should look like:</p>
-<p><a href="{{ url_for('guide_page') }}">click here</a> to know how to upload image correctly.</p>
-            <div style="display: flex; flex-direction: column; gap: 30px; max-width: 700px; margin: 0 auto;">
-                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
-                    <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 1:</p>
-                    <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image 1" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
-                </div>
-                <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
-                    <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 2:</p>
-                    <img src="{{ url_for('static', filename='y.jpg') }}" alt="sample image 2" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
-                </div>
+    <!-- Results Container (Appears right between upload card and examples) -->
+    <div id="resultsContainer"></div>
+
+    <!-- Card 2: Upload Reference Examples -->
+    <div class="upload-card">
+        <p style="color: red; font-weight: 700; font-size: 1.5rem; margin-bottom: 20px; text-align: center;">Upload image should look like:</p>
+        <p><a href="{{ url_for('guide_page') }}">click here</a> to know how to upload image correctly.</p>
+        <div style="display: flex; flex-direction: column; gap: 30px; max-width: 700px; margin: 0 auto;">
+            <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
+                <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 1:</p>
+                <img src="{{ url_for('static', filename='demo.png') }}" alt="sample image 1" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
+            </div>
+            <div style="background: #f9fafb; border: 1px solid #e5e7eb; padding: 15px; border-radius: 12px; text-align: left;">
+                <p style="font-size: 1rem; font-weight: 700; color: var(--text-dark); margin-bottom: 10px;">Example Image 2:</p>
+                <img src="{{ url_for('static', filename='y.jpg') }}" alt="sample image 2" style="width: 100%; height: auto; max-height: none; border-radius: 8px; border: 1px solid #d1d5db; display: block;">
             </div>
         </div>
     </div>
-    <div id="resultsContainer"></div>
 </div>
+
 <script src="{{ url_for('static', filename='script.js') }}"></script>
 <script>
     function closeModal() {
