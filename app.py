@@ -260,6 +260,14 @@ import os
 # extra core to use -- forcing 1 thread is measurably faster there.
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
+import os
+
+# Must be set before any Tesseract subprocess is spawned. On a throttled
+# / fractional-CPU host (e.g. Render free tier), Tesseract's default
+# internal multi-threading just adds scheduling overhead with no real
+# extra core to use -- forcing 1 thread is measurably faster there.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 import gc
 import io
 import math
@@ -329,60 +337,61 @@ def calculate_analytics(
     }
 
 
-def ocr_grid_batch(source_img, grid_rows, offset=(0, 0)):
+def erase_grid_lines(gray, table_grid):
     """
-    Run Tesseract ONE time on the (ideally cropped-to-table) image instead
-    of once per cell, and bucket the returned words into the
-    already-detected grid cells by coordinate overlap.
-
-    `offset` is (x, y) to add back to word coordinates when `source_img`
-    is a crop of the original image, so they line up with `grid_rows`
-    boxes, which stay in original-image coordinates.
-
-    This is the single biggest speed win: N subprocess spawns -> 1.
+    Paint over the detected table grid lines so Tesseract doesn't read
+    them as stray characters (vertical borders get misread as '|', '*',
+    etc. and corrupt neighboring words) -- this is what made a single
+    whole-table OCR pass unreliable.
     """
-    ox, oy = offset
-    data = pytesseract.image_to_data(
-        source_img, config="--oem 1 --psm 6", output_type=Output.DICT
-    )
+    line_mask = cv2.dilate(table_grid, np.ones((3, 3), np.uint8), iterations=1)
+    cleaned = gray.copy()
+    cleaned[line_mask > 0] = 255
+    return cleaned
 
-    # Flatten grid_rows into a single ordered list of boxes, remembering
-    # each box's (row_index, col_index) so we can rebuild the grid after.
-    flat_boxes = []
-    for r_idx, row in enumerate(grid_rows):
-        for c_idx, box in enumerate(row):
-            flat_boxes.append((r_idx, c_idx, box))
 
-    # cell key -> list of words, in reading order
-    cell_words = {(r_idx, c_idx): [] for r_idx, c_idx, _ in flat_boxes}
+def ocr_grid_batch(cleaned_gray, grid_rows):
+    """
+    Run Tesseract once PER ROW (not once per cell, and not once for the
+    whole table).
 
-    n = len(data["text"])
-    for i in range(n):
-        word = data["text"][i].strip()
-        if not word:
-            continue
-        conf = data.get("conf", ["0"] * n)[i]
-        try:
-            if float(conf) < 0:  # tesseract uses -1 for non-text lines
-                continue
-        except (ValueError, TypeError):
-            pass
-
-        wx = data["left"][i] + data["width"][i] / 2 + ox
-        wy = data["top"][i] + data["height"][i] / 2 + oy
-
-        for r_idx, c_idx, (x, y, w, h) in flat_boxes:
-            if x <= wx <= x + w and y <= wy <= y + h:
-                cell_words[(r_idx, c_idx)].append((data["left"][i], word))
-                break
-
-    # Rebuild extracted_grid in the same [row][col] shape as before,
-    # keeping words left-to-right within a cell.
+    - Per-cell is accurate but spawns a subprocess per cell -- the main
+      source of slowness (rows * cols calls).
+    - Whole-table-at-once is fast but unreliable: Tesseract's page
+      segmentation assumes flowing text, so it merges adjacent cells'
+      text into single "words" and misreads grid lines as characters.
+    - Per-row is the sweet spot: a row genuinely *is* one line of text,
+      so Tesseract segments it correctly, and it cuts subprocess calls
+      down to just the row count.
+    """
     extracted_grid = []
-    for r_idx, row in enumerate(grid_rows):
+    pad = 4
+    for row in grid_rows:
+        rx0 = max(0, min(b[0] for b in row) - pad)
+        ry0 = max(0, min(b[1] for b in row) - pad)
+        rx1 = min(cleaned_gray.shape[1], max(b[0] + b[2] for b in row) + pad)
+        ry1 = min(cleaned_gray.shape[0], max(b[1] + b[3] for b in row) + pad)
+        row_crop = cleaned_gray[ry0:ry1, rx0:rx1]
+
+        data = pytesseract.image_to_data(
+            row_crop, config="--oem 1 --psm 7", output_type=Output.DICT
+        )
+
+        col_words = {c_idx: [] for c_idx in range(len(row))}
+        n = len(data["text"])
+        for i in range(n):
+            word = data["text"][i].strip()
+            if not word:
+                continue
+            wx = data["left"][i] + data["width"][i] / 2 + rx0
+            for c_idx, (x, y, w, h) in enumerate(row):
+                if x <= wx <= x + w:
+                    col_words[c_idx].append((data["left"][i], word))
+                    break
+
         row_texts = []
         for c_idx in range(len(row)):
-            words = sorted(cell_words.get((r_idx, c_idx), []), key=lambda t: t[0])
+            words = sorted(col_words[c_idx], key=lambda t: t[0])
             row_texts.append(" ".join(w for _, w in words).strip())
         extracted_grid.append(row_texts)
 
@@ -471,18 +480,10 @@ def process_image():
         for r in grid_rows:
             r.sort(key=lambda b: b[0])
 
-        # --- Crop to just the detected table region before OCR ---
-        # The upload guide tells users to leave margin around the table,
-        # so that margin is dead weight for Tesseract to scan otherwise.
-        pad = 6
-        x0 = max(0, min(b[0] for r in grid_rows for b in r) - pad)
-        y0 = max(0, min(b[1] for r in grid_rows for b in r) - pad)
-        x1 = min(gray.shape[1], max(b[0] + b[2] for r in grid_rows for b in r) + pad)
-        y1 = min(gray.shape[0], max(b[1] + b[3] for r in grid_rows for b in r) + pad)
-        cropped_gray = gray[y0:y1, x0:x1]
-
-        # --- Single batched OCR pass instead of one call per cell ---
-        extracted_grid = ocr_grid_batch(cropped_gray, grid_rows, offset=(x0, y0))
+        # --- Erase grid lines, then OCR once per ROW instead of once
+        # per CELL (rows * cols subprocess calls -> just rows) ---
+        cleaned_gray = erase_grid_lines(gray, table_grid)
+        extracted_grid = ocr_grid_batch(cleaned_gray, grid_rows)
 
         header_row = extracted_grid[0]
 
