@@ -253,9 +253,17 @@
 #     app.run(host="0.0.0.0", port=port, debug=False)
 
 import os
+
+# Must be set before any Tesseract subprocess is spawned. On a throttled
+# / fractional-CPU host (e.g. Render free tier), Tesseract's default
+# internal multi-threading just adds scheduling overhead with no real
+# extra core to use -- forcing 1 thread is measurably faster there.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+
 import gc
 import io
 import math
+import threading
 import cv2
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
@@ -266,6 +274,12 @@ from pytesseract import Output
 
 app = Flask(__name__)
 CORS(app)
+
+# Free-tier hosts give you a fraction of one CPU core, not real
+# parallelism. Rather than let concurrent uploads fight over that sliver
+# of CPU (which is what was causing the "stuck on loading" behavior),
+# serialize OCR work: one job runs at a time, others wait their turn.
+_ocr_lock = threading.Lock()
 
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
@@ -315,14 +329,19 @@ def calculate_analytics(
     }
 
 
-def ocr_grid_batch(source_img, grid_rows):
+def ocr_grid_batch(source_img, grid_rows, offset=(0, 0)):
     """
-    Run Tesseract ONE time on the whole table image (instead of once per
-    cell) and bucket the returned words into the already-detected grid
-    cells by coordinate overlap.
+    Run Tesseract ONE time on the (ideally cropped-to-table) image instead
+    of once per cell, and bucket the returned words into the
+    already-detected grid cells by coordinate overlap.
+
+    `offset` is (x, y) to add back to word coordinates when `source_img`
+    is a crop of the original image, so they line up with `grid_rows`
+    boxes, which stay in original-image coordinates.
 
     This is the single biggest speed win: N subprocess spawns -> 1.
     """
+    ox, oy = offset
     data = pytesseract.image_to_data(
         source_img, config="--oem 1 --psm 6", output_type=Output.DICT
     )
@@ -349,8 +368,8 @@ def ocr_grid_batch(source_img, grid_rows):
         except (ValueError, TypeError):
             pass
 
-        wx = data["left"][i] + data["width"][i] / 2
-        wy = data["top"][i] + data["height"][i] / 2
+        wx = data["left"][i] + data["width"][i] / 2 + ox
+        wy = data["top"][i] + data["height"][i] / 2 + oy
 
         for r_idx, c_idx, (x, y, w, h) in flat_boxes:
             if x <= wx <= x + w and y <= wy <= y + h:
@@ -386,6 +405,15 @@ def process_image():
     file = request.files["file"]
     if file.filename == "":
         return jsonify({"error": "No selected file"}), 400
+
+    # Wait up to 90s for another upload's OCR to finish rather than
+    # racing it for the same fractional CPU. This is what turns
+    # concurrent users into a short queue instead of a hang.
+    acquired = _ocr_lock.acquire(timeout=90)
+    if not acquired:
+        return jsonify({
+            "error": "Server is busy processing another upload right now. Please try again in a few seconds."
+        }), 503
 
     try:
         image_bytes = file.read()
@@ -443,8 +471,18 @@ def process_image():
         for r in grid_rows:
             r.sort(key=lambda b: b[0])
 
+        # --- Crop to just the detected table region before OCR ---
+        # The upload guide tells users to leave margin around the table,
+        # so that margin is dead weight for Tesseract to scan otherwise.
+        pad = 6
+        x0 = max(0, min(b[0] for r in grid_rows for b in r) - pad)
+        y0 = max(0, min(b[1] for r in grid_rows for b in r) - pad)
+        x1 = min(gray.shape[1], max(b[0] + b[2] for r in grid_rows for b in r) + pad)
+        y1 = min(gray.shape[0], max(b[1] + b[3] for r in grid_rows for b in r) + pad)
+        cropped_gray = gray[y0:y1, x0:x1]
+
         # --- Single batched OCR pass instead of one call per cell ---
-        extracted_grid = ocr_grid_batch(gray, grid_rows)
+        extracted_grid = ocr_grid_batch(cropped_gray, grid_rows, offset=(x0, y0))
 
         header_row = extracted_grid[0]
 
@@ -545,6 +583,8 @@ def process_image():
     except Exception as e:
         gc.collect()
         return jsonify({"error": str(e)}), 500
+    finally:
+        _ocr_lock.release()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
