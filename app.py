@@ -260,14 +260,6 @@ import os
 # extra core to use -- forcing 1 thread is measurably faster there.
 os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
-import os
-
-# Must be set before any Tesseract subprocess is spawned. On a throttled
-# / fractional-CPU host (e.g. Render free tier), Tesseract's default
-# internal multi-threading just adds scheduling overhead with no real
-# extra core to use -- forcing 1 thread is measurably faster there.
-os.environ.setdefault("OMP_THREAD_LIMIT", "1")
-
 import gc
 import io
 import math
@@ -350,7 +342,10 @@ def erase_grid_lines(gray, table_grid):
     return cleaned
 
 
-def ocr_grid_batch(cleaned_gray, grid_rows):
+INK_THRESHOLD = 40  # empirically: dash cells measure ~0-10, real marks ~150+
+
+
+def ocr_grid_batch(cleaned_gray, thresh, grid_rows):
     """
     Run Tesseract once PER ROW (not once per cell, and not once for the
     whole table).
@@ -363,6 +358,12 @@ def ocr_grid_batch(cleaned_gray, grid_rows):
     - Per-row is the sweet spot: a row genuinely *is* one line of text,
       so Tesseract segments it correctly, and it cuts subprocess calls
       down to just the row count.
+
+    Before trusting any OCR result, each cell is first checked for ink
+    density on the (pre-cleanup) binary `thresh` image. A cell that's
+    essentially blank -- a lone "-" -- can get misread by Tesseract as a
+    stray digit or symbol; treating any near-empty cell as blank instead
+    of trusting that guess avoids phantom marks like a "-" becoming "2".
     """
     extracted_grid = []
     pad = 4
@@ -372,6 +373,12 @@ def ocr_grid_batch(cleaned_gray, grid_rows):
         rx1 = min(cleaned_gray.shape[1], max(b[0] + b[2] for b in row) + pad)
         ry1 = min(cleaned_gray.shape[0], max(b[1] + b[3] for b in row) + pad)
         row_crop = cleaned_gray[ry0:ry1, rx0:rx1]
+
+        sparse = []
+        for (x, y, w, h) in row:
+            inner = thresh[y + 4:y + h - 4, x + 4:x + w - 4]
+            ink = int(np.count_nonzero(inner)) if inner.size else 0
+            sparse.append(ink < INK_THRESHOLD)
 
         data = pytesseract.image_to_data(
             row_crop, config="--oem 1 --psm 7", output_type=Output.DICT
@@ -391,6 +398,9 @@ def ocr_grid_batch(cleaned_gray, grid_rows):
 
         row_texts = []
         for c_idx in range(len(row)):
+            if sparse[c_idx]:
+                row_texts.append("")
+                continue
             words = sorted(col_words[c_idx], key=lambda t: t[0])
             row_texts.append(" ".join(w for _, w in words).strip())
         extracted_grid.append(row_texts)
@@ -483,7 +493,7 @@ def process_image():
         # --- Erase grid lines, then OCR once per ROW instead of once
         # per CELL (rows * cols subprocess calls -> just rows) ---
         cleaned_gray = erase_grid_lines(gray, table_grid)
-        extracted_grid = ocr_grid_batch(cleaned_gray, grid_rows)
+        extracted_grid = ocr_grid_batch(cleaned_gray, thresh, grid_rows)
 
         header_row = extracted_grid[0]
 
