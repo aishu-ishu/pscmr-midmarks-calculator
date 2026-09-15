@@ -990,6 +990,17 @@ _ocr_lock = threading.Lock()
 
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
+# Every upload gets resized to this exact width (up OR down). The grid
+# kernels, row-grouping threshold, and crop padding below are all tuned
+# in pixels for a table at roughly this scale. If we only downscaled
+# oversized images (as before), a smaller/lower-res upload would keep
+# its native scale and those pixel constants would silently stop
+# matching reality -- too coarse for a tiny image, too fine for a huge
+# one. Normalizing every upload to the same canonical width keeps the
+# rest of the pipeline's assumptions valid regardless of what
+# resolution/device the screenshot or photo actually came from.
+CANONICAL_WIDTH = 1200
+
 
 # --- OCR-noise-tolerant numeric parsing -------------------------------------
 # Tesseract commonly confuses certain letters/digits (O<->0, I/l<->1, S<->5,
@@ -1177,6 +1188,19 @@ def align_row_to_header(row, header_cells):
     return aligned
 
 
+def is_total_label(text):
+    """
+    Fuzzy-match a header cell against "Total"/"Totals" so a misread like
+    "Totai", "Tolal", or "T0tal" still gets excluded from the subject
+    list -- an exact string match would let one bad OCR character turn
+    the totals column into a fake extra "subject".
+    """
+    s = re.sub(r"[^a-z]", "", text.lower())
+    if not s:
+        return False
+    return s in ("total", "totals", "tota", "totl", "toal", "totai")
+
+
 # --- Row-label matching ------------------------------------------------------
 # The row labels (Unit-1, Obj-1(A), Internal-I total, ...) come from a
 # fixed, small vocabulary baked into calculate_analytics' formula -- these
@@ -1206,6 +1230,12 @@ def normalize_metric_label(raw_label):
     or OCR garbage). Returning None means "skip this row" rather than
     guessing -- much safer than a positional fallback when the row order
     can shift (banners, extra rows, missing sections all shift it).
+
+    For a bare "Unit-3" with no surviving (1)/(2) marker, returns the
+    placeholder "Unit-3(?)" instead of guessing -- the caller resolves
+    that using the row's position in the overall sequence, since
+    defaulting it to (1) here would risk silently overwriting Internal-I's
+    Unit-3(1) with what was actually Internal-II's Unit-3(2).
     """
     s = raw_label.lower().strip()
     s = re.sub(r"\s+", "", s)
@@ -1216,7 +1246,11 @@ def normalize_metric_label(raw_label):
     if m:
         digit = "5" if m.group(1) == "s" else m.group(1)
         if digit == "3":
-            return "Unit-3(2)" if m.group(2) == "2" else "Unit-3(1)"
+            if m.group(2) == "2":
+                return "Unit-3(2)"
+            if m.group(2) in ("1", "i", "l"):
+                return "Unit-3(1)"
+            return "Unit-3(?)"
         return f"Unit-{digit}"
 
     m = re.match(r"^obj-?([i1l2])\)?\(?a\)?", s)
@@ -1264,14 +1298,32 @@ def process_image():
         image_bytes = file.read()
         pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        max_width = 1200
-        if pil_img.width > max_width:
-            ratio = max_width / float(pil_img.width)
-            new_height = int(float(pil_img.height) * ratio)
-            pil_img = pil_img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+        if pil_img.width != CANONICAL_WIDTH:
+            ratio = CANONICAL_WIDTH / float(pil_img.width)
+            new_height = max(1, int(round(pil_img.height * ratio)))
+            resample = (
+                Image.Resampling.LANCZOS
+                if pil_img.width > CANONICAL_WIDTH
+                else Image.Resampling.BICUBIC
+            )
+            pil_img = pil_img.resize((CANONICAL_WIDTH, new_height), resample)
 
         img = np.array(pil_img)
         gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+        # Estimate and divide out uneven illumination before thresholding.
+        # Clean screenshots are already flat, so this is a no-op for them,
+        # but a phone photo of a printed/handwritten marks sheet often has
+        # a lighting gradient or shadow across the page; a plain global
+        # Otsu threshold on that raw image blows out one side to solid
+        # black/white or loses faint strokes on the darker side. Dividing
+        # by a heavily-closed copy of itself cancels the slow-varying
+        # lighting while keeping the actual text/lines, which are
+        # high-frequency.
+        background = cv2.morphologyEx(
+            gray, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+        )
+        gray = cv2.divide(gray, background, scale=255)
 
         thresh = cv2.threshold(
             gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
@@ -1332,39 +1384,87 @@ def process_image():
         cleaned_gray = erase_grid_lines(gray, table_grid)
         extracted_grid = ocr_grid_batch(cleaned_gray, thresh, grid_rows)
 
-        # Find the header row by content ("Subject" in its first cell)
-        # rather than assuming it's always row 0. This matters once a
-        # table can have a title/section-banner row above the real header
-        # that the box-detection didn't fully filter out.
-        header_idx = 0
-        for i, row in enumerate(extracted_grid):
-            if row and "subject" in cell_text(row, 0).lower():
-                header_idx = i
-                break
-        header_row = extracted_grid[header_idx]
-
+        # --- Build subject columns from header row(s) ----------------------
+        # A table can legitimately contain more than one header-like row
+        # (e.g. a "Subject | ..." row repeated under each Internal-I /
+        # Internal-II banner on some sheet layouts). Rather than assuming
+        # the very first one is authoritative for the whole table, every
+        # row that still looks like a header re-establishes the column
+        # mapping from that point on -- this stays correct even if a
+        # subject only appears under a later header, or column spacing
+        # drifts slightly between sections.
         subjects = []
-        subject_columns = []  # header cell dicts (x0/x1/text), one per subject
-        for idx, cell in enumerate(header_row):
-            cleaned = cell["text"].strip()
-            if idx > 0 and cleaned.lower() not in ["subject", "total", ""] and len(cleaned) > 0:
-                subjects.append(cleaned)
-                subject_columns.append(cell)
+        subject_columns = []
+        subject_data = {}
+        subject_order = []  # first-seen order, spanning every header encountered
 
-        if not subjects and len(header_row) > 1:
-            for idx in range(1, len(header_row)):
-                subjects.append(header_row[idx]["text"] or f"Subject_{idx}")
-                subject_columns.append(header_row[idx])
+        def refresh_header(row):
+            nonlocal subjects, subject_columns
+            new_subjects, new_columns, used = [], [], set()
+            for idx, cell in enumerate(row):
+                if idx == 0:
+                    continue
+                cleaned = cell["text"].strip()
+                if is_total_label(cleaned):
+                    continue
+                # A header cell that OCR'd blank (or too garbled to keep)
+                # still occupies a real column with real marks underneath
+                # it -- dropping the column would silently throw that
+                # subject's entire row of marks away. Give it a positional
+                # placeholder name instead of discarding it.
+                name = cleaned if cleaned else f"Subject_{idx}"
+                base, n = name, 1
+                while name in used:
+                    n += 1
+                    name = f"{base}_{n}"
+                used.add(name)
+                new_subjects.append(name)
+                new_columns.append(cell)
+            subjects = new_subjects
+            subject_columns = new_columns
+            for s in subjects:
+                if s not in subject_data:
+                    subject_order.append(s)
+                subject_data.setdefault(s, {col: None for col in TARGET_COLUMNS})
 
-        subject_data = {s: {col: None for col in TARGET_COLUMNS} for s in subjects}
+        has_header_row = any(
+            row and "subject" in cell_text(row, 0).lower() and len(row) > 1
+            for row in extracted_grid
+        )
 
-        for r_idx in range(header_idx + 1, len(extracted_grid)):
-            row = extracted_grid[r_idx]
+        rows_to_scan = extracted_grid
+        if not has_header_row and extracted_grid and len(extracted_grid[0]) > 1:
+            # No row explicitly says "Subject" (OCR dropped/garbled it) --
+            # fall back to treating the very first row as the header.
+            refresh_header(extracted_grid[0])
+            rows_to_scan = extracted_grid[1:]
+
+        unit3_seen = 0
+        for row in rows_to_scan:
             if not row:
                 continue
 
             raw_label = cell_text(row, 0)
+
+            if "subject" in raw_label.lower() and len(row) > 1:
+                refresh_header(row)
+                continue
+
+            if not subjects:
+                # Haven't hit a usable header yet -- e.g. this is a banner
+                # row like "Internal-I" appearing before the header row.
+                # There's nothing to align this row's values against.
+                continue
+
             matched_key = normalize_metric_label(raw_label)
+            if matched_key and matched_key.startswith("Unit-3"):
+                unit3_seen += 1
+                if matched_key == "Unit-3(?)":
+                    # OCR lost the (1)/(2) marker entirely -- resolve by
+                    # position in the exam sequence: the first Unit-3 row
+                    # encountered belongs to Internal-I, the next to
+                    # Internal-II.
+                    matched_key = "Unit-3(1)" if unit3_seen == 1 else "Unit-3(2)"
 
             if not matched_key:
                 # Section banner ("Internal-I"/"Internal-II"), an extra row
@@ -1383,8 +1483,11 @@ def process_image():
                 if cell_val and cell_val not in ["-", "--", "None", "null", "."]:
                     subject_data[subject][matched_key] = cell_val
 
+        if not subject_order:
+            return jsonify({"error": "Could not detect a subject header row in the table"}), 400
+
         final_rows = []
-        for s in subjects:
+        for s in subject_order:
             s_dict = {"Subject": s}
             s_dict.update(subject_data[s])
 
