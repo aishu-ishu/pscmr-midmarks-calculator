@@ -64,34 +64,46 @@ async function uploadImage() {
         }
 
         data.rows.forEach(subject => {
-            // Strict check: treat null, undefined, "Pending", or empty strings as pending.
-            // Explicit numbers (including 0) will evaluate as FALSE so they render Scenario B properly.
-           // Bulletproof Pending Check
-const isMid2Pending = (
-    subject.Mid2_Score === null || 
-    subject.Mid2_Score === undefined || 
-    subject.Mid2_Score === "Pending" ||
-    String(subject.Mid2_Score).trim() === "" ||
-    // If Mid2 is 0 BUT Best_Mid_80 hasn't been calculated by backend yet
-    (Number(subject.Mid2_Score) === 0 && (subject.Best_Mid_80 === null || subject.Best_Mid_80 === undefined || subject.Best_Mid_80 === ""))
-);
+            // Bulletproof Pending Check
+            const isMid2Pending = (
+                subject.Mid2_Score === null || 
+                subject.Mid2_Score === undefined || 
+                subject.Mid2_Score === "Pending" ||
+                String(subject.Mid2_Score).trim() === "" ||
+                (Number(subject.Mid2_Score) === 0 && (subject.Best_Mid_80 === null || subject.Best_Mid_80 === undefined || subject.Best_Mid_80 === ""))
+            );
 
             let cardHTML = '';
 
             if (isMid2Pending) {
-                // --- SCENARIO A: MID 2 IS PENDING (Calculate Required Mid 2 for Avg 24) ---
+                // --- SCENARIO A: MID 2 IS PENDING ---
                 const mid1 = Number(subject.Mid1_Score) || 0;
-                const targetAvg = 24;
-                const maxMarks = 30; // Scale to 30 marks total
+                const targetAvg = 16; // Minimum Mid Average needed to reach 40 total with a 24 in Semester
+                const maxMarks = 30;
 
-                // Formula assuming Mid 2 must be the Best Score (80% weight) to reach 24
-                const reqMid2 = Math.ceil((targetAvg - (0.20 * mid1)) / 0.80);
+                let reqMid2 = 0;
+
+                // Step 1: Calculate rounded 80% weight assuming Mid 1 is higher
+                const mid1Weighted80 = Math.floor(mid1 * 0.8 + 0.5);
+                const neededFromMid2 = targetAvg - mid1Weighted80;
+
+                if (neededFromMid2 <= 0) {
+                    reqMid2 = 0;
+                } else {
+                    // Mid 1 is high enough; Mid 2 only needs 20% weight
+                    reqMid2 = Math.ceil(neededFromMid2 / 0.20);
+
+                    // If required score exceeds Mid 1, then Mid 2 becomes the 80% weight instead
+                    if (reqMid2 > mid1) {
+                        reqMid2 = Math.ceil((targetAvg - (0.20 * mid1)) / 0.80);
+                    }
+                }
                 
                 let reqStatusText = '';
                 let statusPillStyle = '';
 
                 if (reqMid2 <= 0) {
-                    reqStatusText = `Mid 1 (${mid1}) is high enough! Target of ${targetAvg}/30 is already guaranteed.`;
+                    reqStatusText = `Mid 1 (${mid1}) is high enough! Mid Average target of ${targetAvg}/30 is already guaranteed.`;
                     statusPillStyle = 'background: #dcfce7; color: #15803d; border: 1px solid #86efac;';
                 } else if (reqMid2 > maxMarks) {
                     reqStatusText = `Cannot reach Mid Avg of ${targetAvg} even with ${maxMarks}/${maxMarks} in Mid 2.`;
@@ -121,7 +133,7 @@ const isMid2Pending = (
                                 </div>
                             </div>
                             <div class="banner-blue" style="margin-bottom: 16px;">
-                                <div class="banner-title">Required Mid 2 Score (for 24 Mid Avg)</div>
+                                <div class="banner-title">Required Mid 2 Score (for ${targetAvg} Mid Avg)</div>
                                 <div class="banner-val">${reqMid2 <= maxMarks ? (reqMid2 > 0 ? reqMid2 : 0) : 'N/A'}</div>
                                 <div class="banner-sub">out of 30</div>
                             </div>
@@ -132,12 +144,11 @@ const isMid2Pending = (
                     </div>
                 `;
             } else {
-                // --- SCENARIO B: BOTH MIDS COMPLETED (Includes Mid 2 = 0) ---
+                // --- SCENARIO B: BOTH MIDS COMPLETED ---
                 const mid1Val = Number(subject.Mid1_Score) || 0;
                 const mid2Val = Number(subject.Mid2_Score) || 0;
                 const mid1IsBest = mid1Val >= mid2Val;
                 
-                // Dynamic styling: 24 is green, >24 is bold red
                 const isGreen = subject.Required_Sem_Marks === 24;
                 const boxStyle = isGreen 
                     ? 'background-color: #dcfce7; border: 2px solid #16a34a; color: #15803d;' 
