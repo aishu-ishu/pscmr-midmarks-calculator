@@ -29,7 +29,7 @@ function previewImage(event) {
         const preview = document.getElementById('preview');
         preview.src = reader.result;
         preview.style.display = 'block';
-    }
+    };
     if (event.target.files[0]) {
         reader.readAsDataURL(event.target.files[0]);
     }
@@ -64,12 +64,13 @@ async function uploadImage() {
         }
 
         data.rows.forEach(subject => {
-            // Check if Mid 2 is missing/pending
+            // Strict check: treat null, undefined, "Pending", or empty strings as pending.
+            // Explicit numbers (including 0) will evaluate as FALSE so they render Scenario B properly.
             const isMid2Pending = (
                 subject.Mid2_Score === null || 
                 subject.Mid2_Score === undefined || 
                 subject.Mid2_Score === "Pending" ||
-                subject.Mid2_Score === ""
+                String(subject.Mid2_Score).trim() === ""
             );
 
             let cardHTML = '';
@@ -128,8 +129,10 @@ async function uploadImage() {
                     </div>
                 `;
             } else {
-                // --- SCENARIO B: BOTH MIDS COMPLETED ---
-                const mid1IsBest = subject.Mid1_Score >= subject.Mid2_Score;
+                // --- SCENARIO B: BOTH MIDS COMPLETED (Includes Mid 2 = 0) ---
+                const mid1Val = Number(subject.Mid1_Score) || 0;
+                const mid2Val = Number(subject.Mid2_Score) || 0;
+                const mid1IsBest = mid1Val >= mid2Val;
                 
                 // Dynamic styling: 24 is green, >24 is bold red
                 const isGreen = subject.Required_Sem_Marks === 24;
