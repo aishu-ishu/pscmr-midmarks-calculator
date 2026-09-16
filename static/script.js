@@ -66,12 +66,15 @@ async function uploadImage() {
         data.rows.forEach(subject => {
             // Strict check: treat null, undefined, "Pending", or empty strings as pending.
             // Explicit numbers (including 0) will evaluate as FALSE so they render Scenario B properly.
-            const isMid2Pending = (
-                subject.Mid2_Score === null || 
-                subject.Mid2_Score === undefined || 
-                subject.Mid2_Score === "Pending" ||
-                String(subject.Mid2_Score).trim() === ""
-            );
+           // Bulletproof Pending Check
+const isMid2Pending = (
+    subject.Mid2_Score === null || 
+    subject.Mid2_Score === undefined || 
+    subject.Mid2_Score === "Pending" ||
+    String(subject.Mid2_Score).trim() === "" ||
+    // If Mid2 is 0 BUT Best_Mid_80 hasn't been calculated by backend yet
+    (Number(subject.Mid2_Score) === 0 && (subject.Best_Mid_80 === null || subject.Best_Mid_80 === undefined || subject.Best_Mid_80 === ""))
+);
 
             let cardHTML = '';
 
